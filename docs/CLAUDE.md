@@ -23,7 +23,7 @@ Every service must apply real business rules or talk to another service — CRUD
 | Admin & Notification (`admin-service`, `notification-sender`) | Mohamed Wael | create/edit/publish/close scholarships (with rubric + eligibility) · accept/reject reviewed applications + email · account management (list users, create reviewer, disable/enable) · audit log + stats | rubric weights sum to 100 and lock on publish · decide only `reviewed` applications · flagged applications can only be rejected · accepted count ≤ awards (atomic counter) · cannot disable yourself or the last admin · email via queue with retries |
 
 **Shared components (not part of anyone's three functions):**
-- **Authentication (`auth-service`)**: register, login, current user. Lead: Wael (decided 24 Nov), reviewed by all three. Includes the Pwned Passwords check (a security control, not the external integration).
+- **Authentication (`auth-service`)**: register, login, current user. Lead: Wael (decided 24 Nov), built in **slices** by all three in Phase B (see section 11): Khalil = register (domain check, min length, Pwned Passwords); Hazem = login backoff (`LoginAttempts`, 429, `login_failed` events, CloudWatch filter + alarm); Wael = login (bcryptjs + JWT), `GET /me`, password change, `shared/auth.js` verification, and `auth-service/infra/deploy.sh`. One Lambda, one repo, one slice per file; Wael reviews every PR. Includes the Pwned Passwords check (a security control, not the external integration).
 - GitHub organization, `platform/` scripts, API Gateway, `deploy-all.sh`: lead Wael.
 - `shared-lib/` helpers (including the temporary test-user `auth.js` so nobody waits for login) and `seed.sh`: lead Wael (decided 24 Nov: everyone builds their own backend first, anything shared that is a foundation goes to Wael). The CloudWatch metric filter and alarm belong to Hazem's own component (section 3).
 - Shared frontend (`index.html` login page, `js/config.js`, `api.js`, `auth.js`, `nav.js`): lead Khalil.
@@ -262,7 +262,7 @@ group39/
     shared-lib/             auth.js  errors.js  validate.js  audit.js  dynamo.js  VERSION   (the one true copy)
     docs/                   CLAUDE.md (this file)  api-contract.md  decisions.md  threat-model.md  test-plan.md  final-report-checklist.md
     evidence/
-  auth-service/             (shared component; lead Wael, all three review)
+  auth-service/             (shared component; lead Wael; Khalil, Hazem and Wael each own a slice, see section 1)
   application-service/      (Khalil)
   review-service/           (Hazem: review-service + release-expired-claims)
   admin-service/            (Wael: admin-service + notification-sender)
@@ -301,7 +301,10 @@ events/     saved test events          tests/  Postman collection
 
 ## 11. Team workflow
 
-- **Order of work:** backend first — each owner builds and tests their functions in their own repo with Postman/REST Client. In week 1 Khalil builds the thin shared frontend shell (login page, `api.js`, `config.js`, one page calling `/api/health` from the S3 site) to prove CORS + token flow early. Each owner then builds **their own** pages once their backend functions pass their tests (target: by the mid-point, not the last week) — frontend is marked individually (5%) and must call the real backend.
+- **Order of work (three phases, decided 24 Nov):**
+  - **Phase A — everyone builds their own backend, alone.** Each owner builds and tests every function of their own service in their own repo with Postman/REST Client, using the temporary test user in `shared-lib/auth.js`. Wael builds `shared-lib/` first. **Nobody touches login, the real auth-service, the frontend, or database changes (Neon, new tables, new attributes) until all three services pass their own tests.** Phase A is done when every function in section 1 returns the right status codes (section 8) and its business rules are proven by saved tests.
+  - **Phase B — join the pieces.** Only after Phase A is finished by all three: each person writes their auth slice (section 1), Wael assembles and deploys `auth-service` and replaces the test user, `platform/reset.sh && platform/deploy-all.sh` must pass on a clean Floci, and we run the cross-service flow (apply → claim → score → decide → email queued). First check: a tiny page on the S3 site calling `/api/health` proves CORS and the token flow. Decide the Neon question here too.
+  - **Phase C — frontend.** Khalil's shell (`index.html`, `api.js`, `config.js`, `auth.js`, `nav.js`) first, then each owner builds **their own** pages against the real backend (frontend is marked individually, 5%). Target: Phase A ends by the project's mid-point, not the last week (date: **[TO CONFIRM in the group]**).
 - One short branch per function (`feature/review-queue`), merged within 1–2 days via a PR reviewed by one teammate. Every student needs real commits on their own component.
 - Before merging: pull all five repos, then `platform/reset.sh && platform/deploy-all.sh` succeeds on a clean Floci and the shared Postman tests pass.
 - Shared files (`shared-lib/`, `frontend/js/`, `platform/*.sh`, `auth-service`, this file): post in the group first, own small PR, all three approve. Owners only merge into their own backend repo.

@@ -22,3 +22,6 @@ The rulebook is `scholarship-frontend/docs/CLAUDE.md`. It is in a subfolder, so 
 - Never `docker compose down -v` (it deletes every table and function).
 - Check `git log -1` before pushing: no Co-Authored-By lines.
 - If a change needs a shared file (platform/, shared-lib/, auth-service) or another service's code, post in the group first.
+
+## Current phase
+Phase A: build ONLY your own service until all your functions pass your tests (see docs/CLAUDE.md section 11). Do not start login, the real auth-service, the frontend, or database changes yet. Tell your Claude this in your first message.
