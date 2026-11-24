@@ -4,6 +4,9 @@
 set -e
 export AWS_PROFILE=floci MSYS_NO_PATHCONV=1 AWS_PAGER=""
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# MSYS_NO_PATHCONV stops Git Bash translating /c/... and /tmp/... for the Windows aws.exe, so pass C:/... paths
+winpath() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
+HERE="$(winpath "$HERE")"
 SITE_DIR="$HERE/../frontend"
 BUCKET=scholarship-web
 
@@ -50,7 +53,7 @@ if ! aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
 fi
 
 # Upload a staged copy so we never edit the tracked config.js
-STAGE=$(mktemp -d)
+STAGE=$(winpath "$(mktemp -d)")
 trap 'rm -rf "$STAGE"' EXIT
 cp -r "$SITE_DIR"/. "$STAGE"/
 CONFIG="$STAGE/js/config.js"
@@ -68,9 +71,12 @@ aws s3 cp "$STAGE" "s3://$BUCKET" --recursive --exclude "*" --include "*.css" \
 aws s3 cp "$STAGE" "s3://$BUCKET" --recursive --exclude "*" --include "*.js" \
   --content-type text/javascript --metadata-directive REPLACE >/dev/null
 aws s3 cp "$STAGE" "s3://$BUCKET" --recursive --exclude "*" --include "*.html" \
-  --content-type text/html --metadata-directive REPLACE >/dev/null
+  --content-type "text/html; charset=utf-8" --metadata-directive REPLACE >/dev/null
 
-# Public can only read objects (s3:GetObject), nothing else
+# Public can only read objects (s3:GetObject), nothing else.
+# New buckets block public policies by default; allow the policy, keep public ACLs blocked.
+aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=false
 aws s3api put-bucket-policy --bucket "$BUCKET" --policy "file://$HERE/s3-public-read-policy.json"
 
 echo "shared resources ready"
