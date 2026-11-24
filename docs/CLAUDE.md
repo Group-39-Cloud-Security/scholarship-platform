@@ -25,7 +25,7 @@ Every service must apply real business rules or talk to another service — CRUD
 **Shared components (not part of anyone's three functions):**
 - **Authentication (`auth-service`)**: register, login, current user. Lead: Khalil, built and reviewed by all three. Includes the Pwned Passwords check (a security control, not the external integration).
 - GitHub organization, `platform/` scripts, API Gateway, `deploy-all.sh`: lead Wael.
-- `seed.sh`, `shared-lib/` helpers, CloudWatch metric filters/alarms: lead Hazem.
+- `shared-lib/` helpers (including the temporary test-user `auth.js` so nobody waits for login) and `seed.sh`: lead Wael (decided 24 Nov: everyone builds their own backend first, anything shared that is a foundation goes to Wael). The CloudWatch metric filter and alarm belong to Hazem's own component (section 3).
 - Shared frontend (`index.html` login page, `js/config.js`, `api.js`, `auth.js`, `nav.js`): lead Khalil.
 
 ---

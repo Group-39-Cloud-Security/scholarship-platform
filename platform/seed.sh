@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test data. Owner: Mohamed Hazem · reads platform/.env (SEED_ADMIN_PASSWORD etc. — never committed)
+# Test data. Owner: Mohamed Wael · reads platform/.env (SEED_ADMIN_PASSWORD etc. — never committed)
 set -e
 export AWS_PROFILE=floci MSYS_NO_PATHCONV=1 AWS_PAGER=""
 # TODO:

@@ -1,5 +1,5 @@
 // auth.js — requireAuth + requireRole
-// Owner: Shared (lead: Mohamed Hazem; changes need all three to approve)   ·   Rules: CLAUDE.md §9–§10
+// Owner: Shared (lead: Mohamed Wael; changes need all three to approve)   ·   Rules: CLAUDE.md §9–§10
 // TODO:
 //   - verify JWT (secret from SSM, cached), re-read user from Users (role, status) → 401 if missing/disabled
 //   - requireRole(...roles) → 403
