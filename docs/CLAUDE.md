@@ -114,7 +114,7 @@ Floci Dash is for looking only; everything is still created by scripts (rule 7).
 | Kind | Name |
 |---|---|
 | Lambda functions | `auth-service`, `application-service`, `review-service`, `release-expired-claims`, `admin-service`, `notification-sender` |
-| IAM roles | `<function-name>-role` (e.g. `admin-service-role`) |
+| IAM roles | `<function-name>-role` (e.g. `admin-service-role`) · `scheduler-invoke-role` (used by EventBridge Scheduler) |
 | DynamoDB tables | `Users`, `LoginAttempts`, `Scholarships`, `Applications`, `Reviews`, `AuditLog` |
 | S3 buckets | `scholarship-documents` (private, Block Public Access ON), keys `applications/<applicationId>.pdf` · `scholarship-web` (frontend files only, readable by the browser) |
 | SQS queues | `notifications`, `notifications-dlq` |
@@ -208,6 +208,7 @@ All roles also get `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEv
 | `review-service-role` | `Reviews`: Get/Put/Query (+ index) · `Applications`: Get/Query/Update · `Scholarships`: GetItem (rubric) · S3 `applications/*`: GetObject · `AuditLog`: PutItem |
 | `release-expired-claims-role` | `Applications`: Query (`status-index`)/Update · `AuditLog`: PutItem |
 | `admin-service-role` | `Scholarships`: Get/Put/Update/Query · `Applications`: Get/Query/Update/Scan · `Reviews`: Get/Query · `Users`: Query/Scan/Put/Update · `AuditLog`: PutItem/Query · SQS `notifications`: SendMessage |
+| `scheduler-invoke-role` (trusted by `scheduler.amazonaws.com`) | `lambda:InvokeFunction` on `release-expired-claims` only |
 | `notification-sender-role` | SQS `notifications`: Receive/Delete/GetQueueAttributes · SSM `/scholarship/brevo-api-key`: GetParameter · `Applications`: UpdateItem (`emailStatus` only) · `AuditLog`: PutItem |
 
 Each role's policies live in the owning service's folder: `services/<name>/infra/iam/<role>-trust.json` and `infra/iam/<role>-policy.json` (shared roles in `platform/iam/`).
@@ -273,7 +274,7 @@ The TAs require (1) **one team repository** with all members' work, where **each
 | `admin-service` | Wael's personal proof-of-work repo | private **[TO CONFIRM with the TA: the email says both "all public" and "private per member"]** |
 | `application-service` | Khalil's personal proof-of-work repo | same |
 | `review-service` | Hazem's personal proof-of-work repo | same |
-| `auth-service` | Old repo, its code now lives in `scholarship-platform/services/auth-service` | to archive |
+| ~~`auth-service`~~ | Deleted; its code lives in `scholarship-platform/services/auth-service` | – |
 
 Team repo layout (clone it once, e.g. `~/group39/scholarship-platform`):
 
@@ -288,6 +289,7 @@ scholarship-platform/
     review-service/       (Hazem: review-service + release-expired-claims)
     admin-service/        (Wael: admin-service + notification-sender)
   docs/                   CLAUDE.md (this file)  api-contract.md  api-test-plan.md  decisions.md  threat-model.md  final-report-checklist.md  individual-statements/
+  tests/shared-lib/       unit tests for shared-lib (node --test "tests/shared-lib/*.test.js"); never synced into services
   evidence/
 ```
 
