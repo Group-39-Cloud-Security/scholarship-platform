@@ -1,0 +1,24 @@
+# Floci = local AWS (port 4566). Start from the scholarship-frontend folder:
+#   docker compose -f platform/docker-compose.yml up -d
+# Stop:  docker compose -f platform/docker-compose.yml down
+# NEVER add -v to "down": it deletes the floci-data volume (all tables and functions).
+#
+# Built from Floci's public quick start. If the lab's infra/floci/docker-compose.yml
+# differs (image name, Floci Dash settings), prefer the lab's file and keep the two
+# settings marked "ours" below, but do NOT copy its "app" profile containers.
+services:
+  floci:
+    image: floci/floci:latest
+    container_name: floci
+    ports:
+      - "4566:4566"
+    volumes:
+      - floci-data:/app/data
+      # Lambda functions run as containers, so Floci needs the Docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      FLOCI_STORAGE_MODE: persistent                  # ours: default is 'memory' = data lost on restart
+      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "false" # ours: change to "true" once the first functions work
+
+volumes:
+  floci-data:
