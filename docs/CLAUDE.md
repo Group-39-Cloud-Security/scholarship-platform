@@ -319,6 +319,7 @@ events/     saved test events          tests/  Postman collection
 5. Keep the UI simple; spend the effort on business rules, validation and security.
 6. After writing code, explain how a request flows through it, which business rule and security control it implements, so I can defend it in the individual discussion.
 7. Infrastructure is created only by scripts (`infra/deploy.sh` in my repo, `platform/` for shared parts), never by clicking in the dashboard. Never edit files in `shared/` inside a service repo; they are copied from `shared-lib/`.
+8. Git commits: write a short, plain message in my own voice. Do not add `Co-Authored-By` lines, session links or any other tool attribution. AI use is declared in the report (`docs/ai-usage-declaration.md`), not in commit messages.
 
 ---
 
