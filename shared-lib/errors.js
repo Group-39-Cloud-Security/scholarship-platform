@@ -21,6 +21,7 @@ const forbidden = (message = 'You do not have permission to do this.') => new Ap
 // resource: 'Scholarship' | 'Application' | 'Review' | 'User'. Also used for someone else's record, so ids can't be probed.
 const notFound = (resource) => new AppError(404, `${resource.toUpperCase()}_NOT_FOUND`, `${resource} not found.`);
 const conflict = (message) => new AppError(409, 'CONFLICT', message);
+const payloadTooLarge = () => new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large.');
 const unsupportedMediaType = () => new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Content-Type must be application/json.');
 const tooManyAttempts = (message = 'Too many attempts. Try again later.') => new AppError(429, 'TOO_MANY_ATTEMPTS', message);
 
@@ -43,6 +44,6 @@ function errorHandler(err, req, res, next) {
 
 module.exports = {
   sendError, AppError,
-  validationError, unauthenticated, forbidden, notFound, conflict, unsupportedMediaType, tooManyAttempts,
+  validationError, unauthenticated, forbidden, notFound, conflict, payloadTooLarge, unsupportedMediaType, tooManyAttempts,
   routeNotFound, errorHandler,
 };
