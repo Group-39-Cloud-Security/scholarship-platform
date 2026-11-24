@@ -23,7 +23,7 @@ Every service must apply real business rules or talk to another service — CRUD
 | Admin & Notification (`admin-service`, `notification-sender`) | Mohamed Wael | create/edit/publish/close scholarships (with rubric + eligibility) · accept/reject reviewed applications + email · account management (list users, create reviewer, disable/enable) · audit log + stats | rubric weights sum to 100 and lock on publish · decide only `reviewed` applications · flagged applications can only be rejected · accepted count ≤ awards (atomic counter) · cannot disable yourself or the last admin · email via queue with retries |
 
 **Shared components (not part of anyone's three functions):**
-- **Authentication (`auth-service`)**: register, login, current user. Lead: Khalil, built and reviewed by all three. Includes the Pwned Passwords check (a security control, not the external integration).
+- **Authentication (`auth-service`)**: register, login, current user. Lead: Wael (decided 24 Nov), reviewed by all three. Includes the Pwned Passwords check (a security control, not the external integration).
 - GitHub organization, `platform/` scripts, API Gateway, `deploy-all.sh`: lead Wael.
 - `shared-lib/` helpers (including the temporary test-user `auth.js` so nobody waits for login) and `seed.sh`: lead Wael (decided 24 Nov: everyone builds their own backend first, anything shared that is a foundation goes to Wael). The CloudWatch metric filter and alarm belong to Hazem's own component (section 3).
 - Shared frontend (`index.html` login page, `js/config.js`, `api.js`, `auth.js`, `nav.js`): lead Khalil.
@@ -262,7 +262,7 @@ group39/
     shared-lib/             auth.js  errors.js  validate.js  audit.js  dynamo.js  VERSION   (the one true copy)
     docs/                   CLAUDE.md (this file)  api-contract.md  decisions.md  threat-model.md  test-plan.md  final-report-checklist.md
     evidence/
-  auth-service/             (shared component; lead Khalil, all three review)
+  auth-service/             (shared component; lead Wael, all three review)
   application-service/      (Khalil)
   review-service/           (Hazem: review-service + release-expired-claims)
   admin-service/            (Wael: admin-service + notification-sender)
