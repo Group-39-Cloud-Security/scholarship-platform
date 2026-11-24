@@ -1,6 +1,8 @@
 // errors.js — the one error shape for every service: { error: { code, message } }
 // Owner: Shared (lead: Mohamed Wael; changes need all three to approve)   ·   Rules: CLAUDE.md §8–§10
 
+const { log } = require('./logger');
+
 function sendError(res, status, code, message) {
   return res.status(status).json({ error: { code, message } });
 }
@@ -38,7 +40,7 @@ function errorHandler(err, req, res, next) {
   if (err.type === 'entity.parse.failed') return sendError(res, 400, 'VALIDATION_ERROR', 'Request body is not valid JSON.');
   if (err.type === 'entity.too.large') return sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Request body is too large.');
   // Unexpected (AWS SDK, bugs): details go to the log only, never to the client. No body, no headers.
-  console.error(JSON.stringify({ level: 'error', method: req.method, path: req.path, error: err.name, message: err.message }));
+  log('error', 'unhandled error', { method: req.method, path: req.path, error: err.name, errorMessage: err.message });
   return sendError(res, 500, 'INTERNAL_ERROR', 'Something went wrong.');
 }
 
