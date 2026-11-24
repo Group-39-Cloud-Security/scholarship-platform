@@ -128,7 +128,7 @@ Server always sets ids (`crypto.randomUUID()`), `status`, timestamps (ISO 8601 U
 | `Scholarships` (Wael) | PK `scholarshipId` | `status-deadline-index` (PK `status`, SK `deadline`) | `title`, `description`, `deadline`, `awards` (int ≥ 1), `acceptedCount`, `status` (`draft`/`published`/`closed`), `rubric` (list of `{criterionId, name, description, weight}`), `eligibility` (`{allowedDomains[], minGpa, years[]}`), `createdBy`, `createdAt` |
 | `Applications` (Khalil creates; Hazem & Wael change status) | PK `applicationId` | `studentId-index` (PK `studentId`), `scholarshipId-index` (PK `scholarshipId`, SK `submittedAt`), `status-index` (PK `status`, SK `submittedAt`) | `studentId`, `studentEmail`, `scholarshipId`, `essay`, `gpa`, `yearOfStudy`, `pdfKey`, `status`, `reviewerId`, `claimedAt`, `flagged`, `submittedAt`, `decidedBy`, `decidedAt`, `emailStatus` |
 | `Reviews` (Hazem) | PK `applicationId` (one per application) | `reviewerId-index` (PK `reviewerId`, SK `submittedAt`) | `reviewerId`, `scores` (map `criterionId → 0–10`), `totalScore` (0–100), `comment`, `flagged`, `flagReason`, `flagNote`, `submittedAt` |
-| `AuditLog` (everyone writes, Wael reads) | PK `action`, SK `createdAt#logId` | – | `userId`, `targetId`, `detail` (no secrets, no request bodies) |
+| `AuditLog` (everyone writes, Wael reads) | PK `action`, SK `sortKey` (value `<createdAt>#<logId>`) | – | `userId`, `targetId`, `detail` (no secrets, no request bodies) |
 
 Relationships (for the ER diagram): User 1–N Application (student) · User 1–N Review (reviewer) · Scholarship 1–N Application · Application 1–0..1 Review · User 1–N AuditLog · Scholarship embeds its Rubric criteria and Eligibility rules.
 
