@@ -1,0 +1,6 @@
+# REST Client tests for application-service. Copy rows into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
+@baseUrl = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
+@token = PASTE_TOKEN_FROM_get-token.sh
+
+### T-APP-01 health / first normal case
+# TODO: one normal, one invalid (400), one unauthenticated (401), one wrong role (403), one other-user record (404) per function

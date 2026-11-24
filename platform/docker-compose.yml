@@ -1,24 +1,36 @@
-# Floci = local AWS (port 4566). Start from the scholarship-frontend folder:
-#   docker compose -f platform/docker-compose.yml up -d
-# Stop:  docker compose -f platform/docker-compose.yml down
+# Floci = local AWS (port 4566). Run from the repo root (scholarship-platform):
+#   Start:    docker compose -f platform/docker-compose.yml up -d
+#   Console:  http://localhost:4566/_floci/ui   (Floci Dash: for looking only, everything is created by scripts)
+#   Stop:     docker compose -f platform/docker-compose.yml down
 # NEVER add -v to "down": it deletes the floci-data volume (all tables and functions).
 #
-# Built from Floci's public quick start. If the lab's infra/floci/docker-compose.yml
-# differs (image name, Floci Dash settings), prefer the lab's file and keep the two
-# settings marked "ours" below, but do NOT copy its "app" profile containers.
+# Copied from Lab 7's infra/floci/docker-compose.yml (without its "app" profile containers:
+# we deploy to Lambda + S3 instead) plus the IAM line (docs/CLAUDE.md section 2).
+name: scholarship-floci
+
 services:
   floci:
     image: floci/floci:latest
     container_name: floci
     ports:
-      - "4566:4566"
+      - "127.0.0.1:4566:4566"                  # only this PC can reach Floci (not everyone on the same Wi-Fi)
+    environment:
+      FLOCI_HOSTNAME: floci
+      FLOCI_STORAGE_MODE: persistent           # default is 'memory' = data lost on restart
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+      FLOCI_SERVICES_UI_BIND_ADDRESS: "127.0.0.1"
+      # Floci Dash (AWS-Console style web console)
+      FLOCI_BASE_URL: http://floci:4566
+      FLOCI_SERVICES_UI_IMAGE: ghcr.io/ofsazib/floci-dash:latest
+      FLOCI_SERVICES_UI_CONTAINER_NAME: floci-dash
+      FLOCI_SERVICES_UI_ENDPOINT_ENV: FLOCI_URL
+      FLOCI_SERVICES_UI_STATUS_PATH: /api/healthz
+      # IAM is only checked when this is "true". Switch it on once the first functions work,
+      # so least-privilege roles are actually tested (section 7).
+      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "false"
     volumes:
       - floci-data:/app/data
-      # Lambda functions run as containers, so Floci needs the Docker socket
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      FLOCI_STORAGE_MODE: persistent                  # ours: default is 'memory' = data lost on restart
-      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "false" # ours: change to "true" once the first functions work
+      - /var/run/docker.sock:/var/run/docker.sock   # Lambda functions run as containers
 
 volumes:
   floci-data:
