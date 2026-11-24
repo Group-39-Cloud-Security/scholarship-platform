@@ -5,7 +5,7 @@ Shared repo: **frontend pages, platform scripts, shared code, docs**. Changes go
 ```
 frontend/    pages served from S3 (scholarship-web)       — shell: Khalil · pages: each owner
 platform/    Floci + deploy scripts                       — Wael
-shared-lib/  the one true copy of shared backend code     — Hazem (sync into services with npm run sync-shared)
+shared-lib/  the one true copy of shared backend code     — Wael (sync into services with npm run sync-shared)
 docs/        CLAUDE.md (rulebook), report material
 evidence/    screenshots, Postman exports, CLI outputs
 ```
