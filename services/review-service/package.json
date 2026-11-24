@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "sync-shared": "bash scripts/sync-shared.sh",
-    "zip": "bestzip lambda.zip src shared node_modules package.json",
+    "zip": "node scripts/zip-lambda.js",
     "deploy": "bash infra/deploy.sh"
   },
   "dependencies": {
@@ -19,8 +19,5 @@
     "@aws-sdk/client-ssm": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0"
-  },
-  "devDependencies": {
-    "bestzip": "^2.2.1"
   }
 }

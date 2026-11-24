@@ -92,7 +92,7 @@ environment:
   FLOCI_SERVICES_UI_CONTAINER_NAME: floci-dash
   FLOCI_SERVICES_UI_ENDPOINT_ENV: FLOCI_URL
   FLOCI_SERVICES_UI_STATUS_PATH: /api/healthz
-  FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true" # turn on once the first functions work; otherwise IAM is not checked
+  FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "false" # set to "true" once the first functions work; while "false", IAM is not checked
 ```
 Floci Dash is for looking only; everything is still created by scripts (rule 7).
 
@@ -299,7 +299,7 @@ events/     saved test events          tests/  Postman collection
 .env.example  README.md  package.json
 ```
 
-- **Branches:** each member has a long-lived personal branch, `wael`, `khalil`, `hazem`. You commit on your own branch (or on short feature branches cut from it, e.g. `wael/scholarship-publish`), then open a PR from it into `main`; one teammate reviews. After a merge, update your branch from `main` (`git pull origin main`). Nobody commits directly to `main`. This keeps each member's contribution visible in the history and the PR list (report section 9 and the Individual Contribution Statements).
+- **Branches:** each member has a long-lived personal branch, `wael`, `khalil`, `hazem`. You commit on your own branch (or on short feature branches cut from it, e.g. `wael-scholarship-publish`; not `wael/...`, git cannot have both `wael` and `wael/...`), then open a PR from it into `main`; one teammate reviews. After a merge, update your branch from `main` (`git pull origin main`). Nobody commits directly to `main`. This keeps each member's contribution visible in the history and the PR list (report section 9 and the Individual Contribution Statements).
 - **Personal repo:** after your work is merged, copy your own service folder into your personal repo with its history: `git subtree push --prefix=services/<your-service> personal main` (once: `git remote add personal https://github.com/Group-39-Cloud-Security/<your-service>`; the very first time, its old starter commit must be replaced: `git subtree split --prefix=services/<your-service> -b proof && git push --force personal proof:main`). Add your individual statement and evidence there too.
 - `platform/deploy-all.sh` runs: `shared.sh` → `services/auth-service/infra/deploy.sh` → `services/admin-service/...` → `services/application-service/...` → `services/review-service/...` → `seed.sh`.
 - **Shared code:** changed only in `shared-lib/` (small PR, all three approve, bump `VERSION`). Lambda zips cannot reach outside their folder, so `npm run sync-shared` copies `../../shared-lib` into the service's `shared/` before `npm run zip` (`deploy-all.sh` does this every time). Code requires `../shared/...` (from `src/`), never `../../shared-lib` directly.
@@ -334,7 +334,7 @@ events/     saved test events          tests/  Postman collection
   - **Phase A — everyone builds their own backend, alone.** Each owner builds and tests every function of their own service in their own `services/<name>` folder, on their own branch, with Postman/REST Client, using the temporary test users in `shared-lib/auth.js` (section 2). Wael builds `shared-lib/` first. **Nobody touches login, the real auth-service, the frontend, or database changes (Neon, new tables, new attributes) until all three services pass their own tests.** Phase A is done when every function in section 1 returns the right status codes (section 8) and its business rules are proven by saved tests.
   - **Phase B — join the pieces.** Only after Phase A is finished by all three: each person writes their auth slice (section 1), Wael assembles and deploys `auth-service` and replaces the test user, `platform/reset.sh && platform/deploy-all.sh` must pass on a clean Floci, and we run the cross-service flow (apply → claim → score → decide → email queued). First check: a tiny page on the S3 site calling `/api/health` proves CORS and the token flow. Decide the Neon question here too.
   - **Phase C — frontend.** Khalil's shell (`index.html`, `api.js`, `config.js`, `auth.js`, `nav.js`) first, then each owner builds **their own** pages against the real backend (frontend is marked individually, 5%). Target: Phase A ends by the project's mid-point, not the last week (date: **[TO CONFIRM in the group]**).
-- Work on your own branch (`wael`/`khalil`/`hazem`) or a short feature branch cut from it (`hazem/review-queue`); PR into `main` within 1–2 days, reviewed by one teammate. Every student needs real commits on their own component, under their own GitHub account.
+- Work on your own branch (`wael`/`khalil`/`hazem`) or a short feature branch cut from it (`hazem-review-queue`); PR into `main` within 1–2 days, reviewed by one teammate. Every student needs real commits on their own component, under their own GitHub account.
 - Before merging: pull `main`, then `platform/reset.sh && platform/deploy-all.sh` succeeds on a clean Floci and the shared Postman tests pass.
 - Shared files (`shared-lib/`, `frontend/js/`, `platform/*.sh`, `auth-service`, this file): post in the group first, own small PR, all three approve. Owners merge PRs that only touch their own `services/<name>` folder and their own pages after one review; nobody pushes to `main` directly.
 - Decisions go in `docs/decisions.md` (date, decision, why).
