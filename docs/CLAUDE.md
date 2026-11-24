@@ -2,7 +2,7 @@
 
 > Give this file (plus the files you are editing, pulled fresh from `main`) to every Claude chat.
 > If something here is wrong or out of date, fix it in a small PR **before** building on it.
-> Items marked **[TO CONFIRM]** are still open. Version: after Phase 1 feedback + five-repo setup, 19 Nov 2026; Labs 7–8 review added 24 Nov 2026 (section 15).
+> Items marked **[TO CONFIRM]** are still open. Version: after Phase 1 feedback + five-repo setup, 19 Nov 2026; Labs 7–8 review added 24 Nov 2026 (section 15); shared-lib file list, test users and essay character cap added 24 Nov 2026.
 > Final report requirements and the full Phase 1 feedback: `docs/final-report-checklist.md`.
 
 ---
@@ -55,7 +55,7 @@ Logs:    CloudWatch Logs /aws/lambda/<function> + metric filters + alarm · Audi
 - No endpoints or keys in code: inside Floci, Lambdas get `AWS_ENDPOINT_URL` injected; SDK clients are `new XClient({})`, exactly like Lab 7.
 - **External integration:** Brevo (decision emails) is the real one. Pwned Passwords is described as a security control.
 - **Login:** our own JWT (HS256, 1 hour, `jsonwebtoken`) + `bcryptjs` (not `bcrypt`, which breaks in Lambda zips built on Windows). Every service verifies the token with `shared/auth.js` and re-reads the user's role and status from `Users` (so a disabled user is blocked immediately). Cognito is no longer planned. Improvement for later: a Lambda authorizer so only one function reads the JWT secret.
-- **Built in stages:** email first calls Brevo directly, then SQS + `notification-sender` are added. Until login works, `shared/auth.js` uses a hard-coded test user marked `// TODO remove`.
+- **Built in stages:** email first calls Brevo directly, then SQS + `notification-sender` are added. Until login works, `shared/auth.js` uses hard-coded test users marked `// TODO remove`, picked by the token: `Bearer test-student-1`, `test-student-2`, `test-reviewer`, `test-admin` (any other or missing token → 401). Two students so ownership (404 on someone else's record) can be tested, an admin token on a student route proves 403. `req.user` always has the shape `{ userId, email, role, status }`, so in Phase B only the body of `authenticate` changes (JWT verify + `GetItem` on `Users`) and no service code does. No `NODE_ENV` guard (every Lambda runs with `NODE_ENV=production`, so it would block testing on Floci); instead a Phase B test proves `Bearer test-admin` gets 401 after the swap.
 
 ### How it runs (confirmed with the TA)
 - Floci isn't "installed": Docker downloads and runs it from `platform/docker-compose.yml`, so commands run from the `scholarship-frontend` folder: `docker compose -f platform/docker-compose.yml up -d`. Start from a copy of the lab's `infra/floci/docker-compose.yml` (Floci Dash on, `floci-data` volume) and add the settings below; don't copy the lab's `--profile app` containers (we deploy to Lambda + S3 instead).
@@ -171,7 +171,7 @@ reviewed       ──Wael: decide──►            accepted | rejected   (fin
 - Scholarship must be `published` and before its deadline.
 - Student's email domain must be in the scholarship's `allowedDomains`; declared `gpa` ≥ `minGpa`; `yearOfStudy` in `years`. Otherwise 409 with a clear reason.
 - One application per student per scholarship; at most **3 active** applications (`submitted`/`under_review`/`reviewed`). Otherwise 409.
-- Essay 200–1000 words; PDF ≤ 2 MB and must start with `%PDF-` (checked by content, not file name).
+- Essay 200–1000 words and at most 10,000 characters (`checkWords` `maxChars`, so huge "words" can't reach DynamoDB's 400 KB item limit and fail as a 500); PDF ≤ 2 MB and must start with `%PDF-` (checked by content, not file name).
 - GPA and year are self-declared; the reviewer checks them against the PDF and flags `ineligible` if false.
 - Students see their application's status and timeline, and the final decision; never the reviewer's identity, scores or flag details (the rejection email gives the flag reason).
 
@@ -271,7 +271,7 @@ group39/
   scholarship-frontend/     (shared: frontend + platform)
     frontend/               index.html (login/register)  student/  reviewer/  admin/  js/ (config, api, auth, nav)  css/
     platform/               docker-compose.yml  shared.sh  deploy-all.sh  reset.sh  seed.sh  get-token.sh  .env.example
-    shared-lib/             auth.js  errors.js  validate.js  audit.js  dynamo.js  VERSION   (the one true copy)
+    shared-lib/             auth.js  errors.js  validate.js  middleware.js  logger.js  audit.js  dynamo.js  VERSION   (the one true copy)
     docs/                   CLAUDE.md (this file)  api-contract.md  decisions.md  threat-model.md  test-plan.md  final-report-checklist.md
     evidence/
   auth-service/             (shared component; lead Wael; Khalil, Hazem and Wael each own a slice, see section 1)
@@ -294,6 +294,7 @@ events/     saved test events          tests/  Postman collection
 - **Contract between repos:** `docs/api-contract.md` + sections 4–8 of this file. A service never imports another service's code; it only talks to other services through the shared tables in section 5 (with the permissions in section 7) or the API.
 - Pattern inside each service = Lab 4/5/7 MVC: **routes** (method + path + `requireRole`, nothing else) → **controller** (checks `req.is('application/json')` → 415, validates → 400 with one clear message, applies business rules, picks the status code, `next(error)` on failure) → **service** (AWS calls only, never sees `req`/`res`). `app.js` registers, in order: request logger → `securityHeaders` → `cors()` → `express.json()` → `fixBody` → routes → `ROUTE_NOT_FOUND` fallback → error handler (bad JSON → 400, everything else → 500 `INTERNAL_ERROR`, details only in the log). `server.js` = local run, `lambda.js` = `serverless(app)`. Copy `admin-service`'s structure.
 - `fixBody` and `securityHeaders` come from `shared-lib/middleware.js`. `fixBody` is needed because Floci's API Gateway can hand Lambda the body as a Buffer or base64 text (Lab 7 found this on PATCH), so `express.json()` skips it and `req.body` is empty; it decodes and parses it (bad JSON → 400 `VALIDATION_ERROR`). Without it, our PATCH/PUT routes return confusing 400s on Floci.
+- The request logger comes from `shared-lib/logger.js`: it writes the one JSON line per request from section 10 (`{ level, fn, method, path, status, userId, action }`) when the response finishes, and never logs bodies, tokens or headers.
 - `npm run zip` uses the Lab 7 `scripts/zip-lambda.js` (no extra package). It zips a fixed list (`src/`, `shared/`, `package.json`, `node_modules/`), so `.env`, `events/` and `tests/` can never end up in `lambda.zip`.
 - **Docs per service, in the Lab 3 formats:** its section of `docs/api-contract.md` (data dictionary with Field · Type · Source (Client/Server) · Rule, then each endpoint's request, success response, errors, as valid JSON in code fences) and its rows in `docs/api-test-plan.md` (Test ID · Request · Expected · Actual · Pass/Fail — the same table the report's security and integration test sections need). Each repo keeps a `requests.http` and exports its Postman collection to `evidence/`.
 
@@ -318,7 +319,7 @@ events/     saved test events          tests/  Postman collection
 ## 11. Team workflow
 
 - **Order of work (three phases, decided 24 Nov):**
-  - **Phase A — everyone builds their own backend, alone.** Each owner builds and tests every function of their own service in their own repo with Postman/REST Client, using the temporary test user in `shared-lib/auth.js`. Wael builds `shared-lib/` first. **Nobody touches login, the real auth-service, the frontend, or database changes (Neon, new tables, new attributes) until all three services pass their own tests.** Phase A is done when every function in section 1 returns the right status codes (section 8) and its business rules are proven by saved tests.
+  - **Phase A — everyone builds their own backend, alone.** Each owner builds and tests every function of their own service in their own repo with Postman/REST Client, using the temporary test users in `shared-lib/auth.js` (section 2). Wael builds `shared-lib/` first. **Nobody touches login, the real auth-service, the frontend, or database changes (Neon, new tables, new attributes) until all three services pass their own tests.** Phase A is done when every function in section 1 returns the right status codes (section 8) and its business rules are proven by saved tests.
   - **Phase B — join the pieces.** Only after Phase A is finished by all three: each person writes their auth slice (section 1), Wael assembles and deploys `auth-service` and replaces the test user, `platform/reset.sh && platform/deploy-all.sh` must pass on a clean Floci, and we run the cross-service flow (apply → claim → score → decide → email queued). First check: a tiny page on the S3 site calling `/api/health` proves CORS and the token flow. Decide the Neon question here too.
   - **Phase C — frontend.** Khalil's shell (`index.html`, `api.js`, `config.js`, `auth.js`, `nav.js`) first, then each owner builds **their own** pages against the real backend (frontend is marked individually, 5%). Target: Phase A ends by the project's mid-point, not the last week (date: **[TO CONFIRM in the group]**).
 - One short branch per function (`feature/review-queue`), merged within 1–2 days via a PR reviewed by one teammate. Every student needs real commits on their own component.
