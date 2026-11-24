@@ -92,7 +92,7 @@ environment:
   FLOCI_SERVICES_UI_CONTAINER_NAME: floci-dash
   FLOCI_SERVICES_UI_ENDPOINT_ENV: FLOCI_URL
   FLOCI_SERVICES_UI_STATUS_PATH: /api/healthz
-  FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true" # turn on once the first functions work; otherwise IAM is not checked
+  FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "false" # set to "true" once the first functions work; while "false", IAM is not checked
 ```
 Floci Dash is for looking only; everything is still created by scripts (rule 7).
 
