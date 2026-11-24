@@ -2,7 +2,7 @@
 
 > Give this file (plus the files you are editing, pulled fresh from `main`) to every Claude chat.
 > If something here is wrong or out of date, fix it in a small PR **before** building on it.
-> Items marked **[TO CONFIRM]** are still open. Version: after Phase 1 feedback + five-repo setup, 19 Nov 2026.
+> Items marked **[TO CONFIRM]** are still open. Version: after Phase 1 feedback + five-repo setup, 19 Nov 2026; Labs 7–8 review added 24 Nov 2026 (section 15).
 > Final report requirements and the full Phase 1 feedback: `docs/final-report-checklist.md`.
 
 ---
@@ -78,11 +78,23 @@ Logs:    CloudWatch Logs /aws/lambda/<function> + metric filters + alarm · Audi
   - `platform/seed.sh`: first admin (password from local `.env` `SEED_ADMIN_PASSWORD`, never committed), test users, sample scholarships.
 
 ### Floci settings (`platform/docker-compose.yml`)
+Same as the lab's `infra/floci/docker-compose.yml` (Lab 7/8), plus the IAM line:
 ```yaml
+ports:
+  - "127.0.0.1:4566:4566"                        # only this PC can reach Floci (not everyone on the same Wi-Fi)
 environment:
+  FLOCI_HOSTNAME: floci
   FLOCI_STORAGE_MODE: persistent                 # default image is 'memory' = data lost on restart
+  FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+  FLOCI_SERVICES_UI_BIND_ADDRESS: "127.0.0.1"    # Floci Dash at http://localhost:4566/_floci/ui
+  FLOCI_BASE_URL: http://floci:4566
+  FLOCI_SERVICES_UI_IMAGE: ghcr.io/ofsazib/floci-dash:latest
+  FLOCI_SERVICES_UI_CONTAINER_NAME: floci-dash
+  FLOCI_SERVICES_UI_ENDPOINT_ENV: FLOCI_URL
+  FLOCI_SERVICES_UI_STATUS_PATH: /api/healthz
   FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true" # turn on once the first functions work; otherwise IAM is not checked
 ```
+Floci Dash is for looking only; everything is still created by scripts (rule 7).
 
 ---
 
@@ -187,7 +199,7 @@ reviewed       ──Wael: decide──►            accepted | rejected   (fin
 
 ## 7. IAM permissions per role (least privilege)
 
-All roles also get `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`. No role gets `Delete*Table`, `iam:*` or `*`. **No role can update or delete `AuditLog`.** Every role that verifies tokens gets `ssm:GetParameter` on `/scholarship/jwt-secret` only and `dynamodb:GetItem` on `Users`.
+All roles also get `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` **on their own log group only** (`arn:aws:logs:us-east-1:000000000000:log-group:/aws/lambda/<function-name>:*`, not `*`; Lab 8 style). Every policy statement has a `Sid` that says what it is for (e.g. `ApplicationsReadWrite`), so the policy reads like a sentence in the report. No role gets `Delete*Table`, `iam:*` or `*`. **No role can update or delete `AuditLog`.** Every role that verifies tokens gets `ssm:GetParameter` on `/scholarship/jwt-secret` only and `dynamodb:GetItem` on `Users`.
 
 | Role | Allowed (in addition to the above) |
 |---|---|
@@ -280,7 +292,9 @@ events/     saved test events          tests/  Postman collection
 - `platform/deploy-all.sh` runs: `shared.sh` → `../auth-service/infra/deploy.sh` → `../admin-service/infra/deploy.sh` → `../application-service/infra/deploy.sh` → `../review-service/infra/deploy.sh` → `seed.sh`. It fails with a clear message if a sibling repo is missing.
 - **Shared code:** changed only in `shared-lib/` (small PR in `scholarship-frontend`, all three approve, bump `VERSION`), then each owner runs `npm run sync-shared` in their repo. A service whose `shared/VERSION` is behind is the first thing to check when something breaks.
 - **Contract between repos:** `docs/api-contract.md` + sections 4–8 of this file. A service never imports another service's code; it only talks to other services through the shared tables in section 5 (with the permissions in section 7) or the API.
-- Pattern inside each service = Lab 4/5/7 MVC: **routes** (method + path + `requireRole`, nothing else) → **controller** (checks `req.is('application/json')` → 415, validates → 400 with one clear message, applies business rules, picks the status code, `next(error)` on failure) → **service** (AWS calls only, never sees `req`/`res`). `app.js` registers, in order: request logger → `cors()` → `express.json()` → routes → `ROUTE_NOT_FOUND` fallback → error handler (bad JSON → 400, everything else → 500 `INTERNAL_ERROR`, details only in the log). `server.js` = local run, `lambda.js` = `serverless(app)`. Copy `admin-service`'s structure.
+- Pattern inside each service = Lab 4/5/7 MVC: **routes** (method + path + `requireRole`, nothing else) → **controller** (checks `req.is('application/json')` → 415, validates → 400 with one clear message, applies business rules, picks the status code, `next(error)` on failure) → **service** (AWS calls only, never sees `req`/`res`). `app.js` registers, in order: request logger → `securityHeaders` → `cors()` → `express.json()` → `fixBody` → routes → `ROUTE_NOT_FOUND` fallback → error handler (bad JSON → 400, everything else → 500 `INTERNAL_ERROR`, details only in the log). `server.js` = local run, `lambda.js` = `serverless(app)`. Copy `admin-service`'s structure.
+- `fixBody` and `securityHeaders` come from `shared-lib/middleware.js`. `fixBody` is needed because Floci's API Gateway can hand Lambda the body as a Buffer or base64 text (Lab 7 found this on PATCH), so `express.json()` skips it and `req.body` is empty; it decodes and parses it (bad JSON → 400 `VALIDATION_ERROR`). Without it, our PATCH/PUT routes return confusing 400s on Floci.
+- `npm run zip` uses the Lab 7 `scripts/zip-lambda.js` (no extra package). It zips a fixed list (`src/`, `shared/`, `package.json`, `node_modules/`), so `.env`, `events/` and `tests/` can never end up in `lambda.zip`.
 - **Docs per service, in the Lab 3 formats:** its section of `docs/api-contract.md` (data dictionary with Field · Type · Source (Client/Server) · Rule, then each endpoint's request, success response, errors, as valid JSON in code fences) and its rows in `docs/api-test-plan.md` (Test ID · Request · Expected · Actual · Pass/Fail — the same table the report's security and integration test sections need). Each repo keeps a `requests.http` and exports its Postman collection to `evidence/`.
 
 ---
@@ -294,8 +308,10 @@ events/     saved test events          tests/  Postman collection
 - Logs: one JSON line per request `{ level, fn, method, path, status, userId, action }`. **Never** log bodies, essays, passwords, tokens or presigned URLs.
 - Security events (`login`, `login_failed`, `forbidden`, `claim`, `claim_expired`, `decision`, `user_disabled`) go to `AuditLog`.
 - Frontend: `textContent` only, never `innerHTML`. Token in `sessionStorage`; on 401 go back to login.
+- Security headers on every API response (`securityHeaders`, Lab 8): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'none'` (the API only returns JSON).
+- Escape on **output**, not on input: store text exactly as sent (after validation) and show it with `textContent`. Do not copy Lab 8's `sanitize()`, which stores `&lt;` in the database and would corrupt essays and Brevo emails.
 - Transport: everything over HTTPS on real AWS; on Floci it is local HTTP (document as a limitation). Encryption at rest: DynamoDB and S3 encrypt by default on AWS (S3 bucket set to SSE-S3 explicitly).
-- Dependencies: AWS SDK **v3**, `express`, `serverless-http`, `cors`, `dotenv`, `bcryptjs`, `jsonwebtoken` (+ `bestzip` for `npm run zip`). Ask the team before adding anything else.
+- Dependencies: AWS SDK **v3**, `express`, `serverless-http`, `cors`, `dotenv`, `bcryptjs`, `jsonwebtoken` (`npm run zip` uses the Lab 7 script, no package). Load testing uses k6 installed on the laptop, not an app dependency. Ask the team before adding anything else.
 
 ---
 
@@ -357,5 +373,25 @@ events/     saved test events          tests/  Postman collection
 - [x] TA: one backend repo per member + one frontend repo (section 9).
 - [ ] Module rules on AI-assisted code; include an **AI usage declaration** in the report (not raised in our feedback, but Seif marked down groups 5 and 9 for missing one).
 - [ ] Floci checks in week 1: EventBridge Scheduler, CloudWatch metric filters/alarms, DynamoDB TTL, HTTP API throttling, Lambda outbound internet (Brevo, Pwned Passwords). (API Gateway HTTP API, S3 website, CORS via Express and `add-permission` are proven to work on Floci by the Lab 7 API Gateway + S3 lab.)
-- [ ] The labs say the **next lab covers login and roles**: when it is released, compare it with our JWT design (section 2) and align where it costs little.
+- [x] The "login lab" is Lab 8: random session token in a DynamoDB sessions table + Node's built-in `crypto.scrypt` with `timingSafeEqual`, no roles. Our JWT + re-reading `Users` on every request gives the same instant block of disabled users and adds roles, so we keep it (section 15).
+- [ ] Phase B, Wael's auth slice: keep `bcryptjs`, or switch to Node's built-in `crypto.scrypt` (Lab 8) and drop a dependency. Both are defensible; decide before writing login.
+- [ ] Optional, Phase B/C: one k6 load test (Lab 8) against `GET /api/scholarships` for the report's performance numbers (p95, failure rate).
 - [ ] Default rubric criteria for seed data (e.g. academic record 40, essay 40, need 20).
+
+---
+
+## 15. What Labs 7 and 8 confirm (for the report and the discussion)
+
+Lab 7 = API Gateway + S3 on Floci (our deployment model). Lab 8 = load balancing, scaling, k6 and security layers on Floci (ECS/ALB/SNS/EventBridge bus — not our architecture; Floci only records ECS/ALB/Auto Scaling).
+
+| Lab shows | What we do | Why it matters |
+|---|---|---|
+| Lab 8 ignores `X-Forwarded-For` unless behind its own load balancer (test S3) | Login backoff uses `requestContext.http.sourceIp` only (section 6) | A client can fake the header to dodge limits. Hazem can reuse test S3 |
+| Lab 8's rate limiter counts in memory, so 3 workers count separately; the lab says use a shared store (DynamoDB TTL) for real | `LoginAttempts` in DynamoDB with TTL | Lambda also runs many copies; memory counters would not hold |
+| Lab 8's SQS queue has no consumer and no DLQ ("a real system would add both") | `notification-sender` consumes `notifications`; `notifications-dlq` after 3 failures | We went past the lab |
+| Lab 8 keeps config in Secrets Manager | SSM Parameter Store SecureString | Same idea; SSM standard parameters cost nothing, Secrets Manager charges per secret. Note the choice in the report |
+| Lab 8 "always set a maximum: scaling is not DDoS protection" | API Gateway throttling (section 2); optionally Lambda reserved concurrency as a cost cap | Serverless scales out by itself, so the cap is what stops a runaway bill |
+| Lab 8: scale out needs a stateless app | Every Lambda is stateless; all state in DynamoDB/S3 | Any copy can answer any request |
+| Lab 7: Lambda vs EC2 table, "name three provider and three team responsibilities" | Serverless (Lambda + API Gateway) | Needed for the report's cloud-model justification |
+
+Tests to copy into `docs/api-test-plan.md` (security section): Lab 7 T4 (unknown route → `{"message":"Not Found"}` from API Gateway, no log line), T6 (`Origin: http://evil.example` → no `Access-Control-Allow-Origin`), "`.env` on the website → 404"; Lab 8 S1 (security headers present). Phase B: a `platform/check.sh` in the style of `check-lab7.sh` (PASS/FAIL, each FAIL followed by how to fix it) as evidence.
