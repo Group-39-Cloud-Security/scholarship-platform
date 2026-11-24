@@ -27,11 +27,16 @@ function authenticate(req, res, next) {
 
 // Registered after authenticate. Logged in but wrong role → 403 FORBIDDEN, recorded in AuditLog (§10).
 function requireRole(...roles) {
-  return function requireRoleMiddleware(req, res, next) {
+  return async function requireRoleMiddleware(req, res, next) {
     if (!req.user) return next(unauthenticated());
     if (!roles.includes(req.user.role)) {
-      // Not awaited: the 403 goes out straight away. writeAudit never throws, it logs its own failures.
-      void writeAudit({ action: 'forbidden', userId: req.user.userId, targetId: req.path, detail: 'needed ' + roles.join('/') });
+      // Awaited so Lambda can't freeze before the write lands. writeAudit never throws, it logs its own failures.
+      await writeAudit({
+        action: 'forbidden',
+        userId: req.user.userId,
+        targetId: req.originalUrl.split('?')[0], // full path, same as the request log
+        detail: 'needed ' + roles.join('/'),
+      });
       return next(forbidden());
     }
     next();

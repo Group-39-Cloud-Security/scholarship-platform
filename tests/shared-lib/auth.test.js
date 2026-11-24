@@ -8,7 +8,10 @@ const Module = require('node:module');
 const audits = [];
 const realLoad = Module._load;
 Module._load = function (request, ...rest) {
-  if (request === './audit') return { writeAudit: async (entry) => { audits.push(entry); } };
+  // Finishes a tick later, like a real DynamoDB call, so the tests can see whether requireRole waits for it.
+  if (request === './audit') {
+    return { writeAudit: async (entry) => { await new Promise((r) => setImmediate(r)); audits.push(entry); } };
+  }
   return realLoad.call(this, request, ...rest);
 };
 const { authenticate, requireRole } = require('../../shared-lib/auth');
@@ -24,6 +27,9 @@ function run(middleware, req) {
   middleware(req, {}, (e) => { err = e; });
   return err;
 }
+
+// requireRole is async (it awaits the audit write), so wait for next() to be called.
+const runAsync = (middleware, req) => new Promise((resolve) => middleware(req, {}, resolve));
 
 test('each test token sets req.user with the agreed shape', () => {
   for (const [token, role] of [
@@ -65,37 +71,43 @@ test('req.user is a copy, so changing it does not change the test user', () => {
   assert.strictEqual(b.user.role, 'student');
 });
 
-test('requireRole: right role passes, wrong role 403, no user 401', () => {
+test('requireRole: right role passes, wrong role 403, no user 401', async () => {
   const admin = fakeReq('Bearer test-admin');
+  admin.originalUrl = '/api/applications';
   run(authenticate, admin);
-  assert.strictEqual(run(requireRole('admin'), admin), undefined);
-  assert.strictEqual(run(requireRole('reviewer', 'admin'), admin), undefined);
+  assert.strictEqual(await runAsync(requireRole('admin'), admin), undefined);
+  assert.strictEqual(await runAsync(requireRole('reviewer', 'admin'), admin), undefined);
 
-  const err = run(requireRole('student'), admin); // admin token on a student route (§2)
+  const err = await runAsync(requireRole('student'), admin); // admin token on a student route (§2)
   assert.strictEqual(err.status, 403);
   assert.strictEqual(err.code, 'FORBIDDEN');
 
-  assert.strictEqual(run(requireRole('admin'), fakeReq()).status, 401);
+  assert.strictEqual((await runAsync(requireRole('admin'), fakeReq())).status, 401);
 });
 
-test('a 403 is written to AuditLog; passing or 401 requests are not', () => {
+test('a 403 is written to AuditLog with the full path; passing or 401 requests are not', async () => {
   audits.length = 0;
   const student = fakeReq('Bearer test-student-1');
-  student.path = '/stats';
+  student.originalUrl = '/api/admin/stats?since=2026-11-01';
+  student.path = '/stats'; // what req.path would be inside a router mounted at /api/admin
   run(authenticate, student);
-  run(requireRole('reviewer', 'admin'), student);
+  await runAsync(requireRole('reviewer', 'admin'), student);
   assert.deepStrictEqual(audits, [
-    { action: 'forbidden', userId: 'test-student-1', targetId: '/stats', detail: 'needed reviewer/admin' },
+    { action: 'forbidden', userId: 'test-student-1', targetId: '/api/admin/stats', detail: 'needed reviewer/admin' },
   ]);
 
-  run(requireRole('student'), student);
-  run(requireRole('admin'), fakeReq());
+  await runAsync(requireRole('student'), student);
+  await runAsync(requireRole('admin'), fakeReq());
   assert.strictEqual(audits.length, 1);
 });
 
-test('the 403 does not wait for the audit write', () => {
+test('the audit write finishes before the 403 is sent', async () => {
+  audits.length = 0;
   const reviewer = fakeReq('Bearer test-reviewer');
+  reviewer.originalUrl = '/api/admin/users';
   run(authenticate, reviewer);
-  // run() reads the error right after the call, so this only passes if next() ran before writeAudit settled.
-  assert.strictEqual(run(requireRole('admin'), reviewer).status, 403);
+  // The fake writeAudit only records its entry a tick later, so it is there only if requireRole waited for it.
+  const err = await runAsync(requireRole('admin'), reviewer);
+  assert.strictEqual(err.status, 403);
+  assert.strictEqual(audits.length, 1);
 });
