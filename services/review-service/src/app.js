@@ -21,6 +21,12 @@ app.use(cors({ origin: origins }));
 app.use(express.json({ limit: '100kb' }));
 app.use(fixBody({ limit: '100kb' })); // Floci can hand the body over as a Buffer/base64 (Lab 7)
 
+// Responses carry essays and scores: never let a browser or proxy keep a copy (a shared PC, a back button).
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 app.use('/api/reviews', reviewRoutes);
 
 app.use(routeNotFound);
