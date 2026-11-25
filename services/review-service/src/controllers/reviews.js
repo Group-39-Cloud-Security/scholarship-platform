@@ -1,9 +1,8 @@
-// reviews.js — queue · claim · score/flag · my reviews · release · PDF
+// reviews.js - queue, claim, score/flag, my reviews, release, pdf
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing, §8 API, §10 security
 //
-// Controller job (§9): check Content-Type (415), validate input (400), apply the business rules,
-// pick the status code, and next(error) on failure. All AWS calls live in ../services.
-// The reviewer's id always comes from the token (req.user), never from the body.
+// Controller: checks Content-Type (415), validates input (400), applies the business rules and picks the
+// status code. AWS calls are in ../services. The reviewer id always comes from the token, never the body.
 
 const { validationError, unsupportedMediaType, notFound, conflict } = require('../../shared/errors');
 const { writeAudit } = require('../../shared/audit');
@@ -17,7 +16,7 @@ const MAX_ACTIVE_CLAIMS = 5;
 const CLAIM_HOURS = 48;
 const ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 
-// Ids are server-made UUIDs; anything else is rejected before it reaches DynamoDB.
+// Ids are UUIDs made by the server, so anything else is rejected before it reaches DynamoDB.
 function checkId(value) {
   if (typeof value !== 'string' || !ID_PATTERN.test(value)) throw validationError('applicationId is missing or invalid.');
   return value;
@@ -27,8 +26,8 @@ function requireJson(req) {
   if (!req.is('application/json')) throw unsupportedMediaType();
 }
 
-// The claimer check used by every /{applicationId} route. Someone else's (or a missing) application → 404,
-// the same answer for both, so a reviewer can't probe which ids exist.
+// Used by every /{applicationId} route. A missing application and someone else's claim both give 404,
+// so a reviewer can't find out which ids exist.
 async function getOwnApplication(applicationId, reviewerId) {
   const app = await statusService.getApplication(applicationId);
   if (!app || app.reviewerId !== reviewerId) throw notFound('Application');
@@ -37,7 +36,7 @@ async function getOwnApplication(applicationId, reviewerId) {
 
 const expiresAt = (claimedAt) => new Date(Date.parse(claimedAt) + CLAIM_HOURS * 3600 * 1000).toISOString();
 
-// GET /api/reviews/queue — every submitted application, oldest first. No essays, names or emails in the list.
+// GET /api/reviews/queue
 async function viewQueue(req, res, next) {
   try {
     const items = await statusService.listQueue();
@@ -53,21 +52,20 @@ async function viewQueue(req, res, next) {
   }
 }
 
-// POST /api/reviews  { applicationId } — claim one application from the queue.
+// POST /api/reviews  { applicationId }  (claim)
 async function claimApplication(req, res, next) {
   try {
     requireJson(req);
     const applicationId = checkId(req.body.applicationId);
     const reviewerId = req.user.userId;
 
-    // Rule: at most 5 applications under review per reviewer at once.
     const active = await statusService.listActiveClaims(reviewerId);
     if (active.length >= MAX_ACTIVE_CLAIMS) {
       throw conflict(`You already have ${MAX_ACTIVE_CLAIMS} applications under review. Submit or release one first.`);
     }
 
-    // Rule: atomic claim. The conditional update only succeeds while the status is still `submitted`,
-    // so if two reviewers click at the same moment exactly one wins and the other gets 409.
+    // The update only works while the status is still "submitted", so if two reviewers claim the
+    // same application at the same time only one of them gets it and the other gets 409.
     const claimedAt = new Date().toISOString();
     const won = await statusService.claim(applicationId, reviewerId, claimedAt);
     if (!won) {
@@ -84,7 +82,7 @@ async function claimApplication(req, res, next) {
   }
 }
 
-// GET /api/reviews/mine — my open claims (with when they expire) + my submitted reviews.
+// GET /api/reviews/mine  (open claims + submitted reviews)
 async function myReviews(req, res, next) {
   try {
     const reviewerId = req.user.userId;
@@ -92,7 +90,7 @@ async function myReviews(req, res, next) {
       statusService.listActiveClaims(reviewerId),
       reviewService.listByReviewer(reviewerId),
     ]);
-    // Reviews don't store the scholarship, so look up each reviewed application once to show its title.
+    // Reviews don't store the scholarship id, so get it from each reviewed application to show the title.
     const reviewedApps = await Promise.all(reviews.map((r) => statusService.getApplication(r.applicationId)));
     const scholarshipOf = {};
     reviewedApps.forEach((a) => { if (a) scholarshipOf[a.applicationId] = a.scholarshipId; });
@@ -123,7 +121,7 @@ async function myReviews(req, res, next) {
   }
 }
 
-// GET /api/reviews/{applicationId} — the application + the scholarship's rubric, for the claimer only.
+// GET /api/reviews/{applicationId}  (claimer only)
 // The student's id and email are left out on purpose: the reviewer scores the work, not the person.
 async function getForReview(req, res, next) {
   try {
@@ -160,9 +158,9 @@ async function getForReview(req, res, next) {
   }
 }
 
-// PUT /api/reviews/{applicationId} — submit scores OR a flag. Either way the application becomes `reviewed`.
-//   scores: { "scores": { "<criterionId>": 0–10, ... }, "comment": "optional" }
-//   flag:   { "flagged": true, "flagReason": "ineligible", "flagNote": "optional, ≤ 500 chars" }
+// PUT /api/reviews/{applicationId}  (claimer only, final)
+//   scores: { "scores": { "<criterionId>": 0-10, ... }, "comment": "optional" }
+//   flag:   { "flagged": true, "flagReason": "ineligible", "flagNote": "optional" }
 async function submitReview(req, res, next) {
   try {
     requireJson(req);
@@ -188,7 +186,7 @@ async function submitReview(req, res, next) {
       const { flagReason, flagNote } = scoring.validateFlag(body);
       review = { applicationId, reviewerId, flagged: true, flagReason, flagNote, comment, submittedAt };
     } else {
-      // Rule: scores are checked against THIS scholarship's rubric, and the total is calculated here.
+      // Scores are checked against this scholarship's rubric and the total is calculated here.
       const scholarship = await scholarshipService.getScholarship(app.scholarshipId);
       const rubric = scholarship && Array.isArray(scholarship.rubric) ? scholarship.rubric : [];
       if (rubric.length === 0) throw conflict('This scholarship has no rubric to score against.');
@@ -197,12 +195,11 @@ async function submitReview(req, res, next) {
       review = { applicationId, reviewerId, scores, totalScore, flagged: false, comment, submittedAt };
     }
 
-    // Step 1: under_review → reviewed, only if I still hold the claim (it may have expired or been released).
+    // 1. under_review -> reviewed, only if I still hold the claim (it may have expired or been released).
     const updated = await statusService.markReviewed(applicationId, reviewerId, review.flagged);
     if (!updated) throw conflict('Your claim on this application is no longer active (released or expired).');
 
-    // Step 2: write the review once. If it fails, put the application back to under_review so it is never
-    // `reviewed` without a review behind it.
+    // 2. Save the review once. If that fails, put the application back to under_review.
     let created;
     try {
       created = await reviewService.createReview(review);
@@ -236,7 +233,7 @@ async function submitReview(req, res, next) {
   }
 }
 
-// DELETE /api/reviews/{applicationId} — give a claim back to the queue (the claimer, or any admin).
+// DELETE /api/reviews/{applicationId}  (release: the claimer, or any admin)
 async function releaseClaim(req, res, next) {
   try {
     const applicationId = checkId(req.params.applicationId);
@@ -258,15 +255,19 @@ async function releaseClaim(req, res, next) {
   }
 }
 
-// GET /api/reviews/{applicationId}/pdf — a 5-minute download link, only while I am reviewing it.
-// The link itself is never logged (§10).
+// GET /api/reviews/{applicationId}/pdf  (claimer only, while under review)
+// Opening a student's document is logged in AuditLog. The link itself is never logged.
 async function downloadPdf(req, res, next) {
   try {
     const applicationId = checkId(req.params.applicationId);
     const app = await getOwnApplication(applicationId, req.user.userId);
     if (app.status !== 'under_review') throw conflict('The PDF is only available while you are reviewing this application.');
     if (!app.pdfKey) throw conflict('This application has no PDF.');
-    res.status(200).json(await documentService.presignPdf(app.pdfKey));
+
+    const link = await documentService.presignPdf(app.pdfKey);
+    res.locals.action = 'pdf_download';
+    await writeAudit({ action: 'pdf_download', userId: req.user.userId, targetId: applicationId, detail: 'presigned link (5 min)' });
+    res.status(200).json(link);
   } catch (err) {
     next(err);
   }

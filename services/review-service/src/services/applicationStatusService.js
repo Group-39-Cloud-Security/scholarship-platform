@@ -1,14 +1,15 @@
-// applicationStatusService.js — reads and conditional status updates on Applications (AWS calls only, never req/res)
+// applicationStatusService.js - reads and status updates on Applications (AWS calls only, no req/res)
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §5, §6 (status flow), §7 (review-service-role)
 //
-// Every status change is ONE UpdateItem with a ConditionExpression, so two reviewers (or a reviewer and the
-// scheduler) can never both win. If the condition fails, DynamoDB throws ConditionalCheckFailedException and
-// these functions return false; the controller then decides between 404 and 409.
+// Every status change is ONE UpdateItem with a ConditionExpression, so two reviewers (or a reviewer and
+// the scheduler) can never both win. If the condition fails these functions return false and the
+// controller decides between 404 and 409.
 
 const { GetCommand, QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('../../shared/dynamo');
 
 const TABLE = () => process.env.APPLICATIONS_TABLE;
+const QUEUE_LIMIT = 50;
 const isConditionFail = (err) => err.name === 'ConditionalCheckFailedException';
 
 async function getApplication(applicationId) {
@@ -16,22 +17,10 @@ async function getApplication(applicationId) {
   return res.Item || null;
 }
 
-// All pages of a Query (DynamoDB returns at most 1 MB per call).
-async function queryAll(params) {
-  const items = [];
-  let ExclusiveStartKey;
-  do {
-    const res = await docClient.send(new QueryCommand({ ...params, ExclusiveStartKey }));
-    items.push(...(res.Items || []));
-    ExclusiveStartKey = res.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return items;
-}
-
-// The shared queue: every `submitted` application, oldest first (status-index: PK status, SK submittedAt).
-// ProjectionExpression keeps essays, emails and PDFs out of the list.
-function listQueue() {
-  return queryAll({
+// The oldest 50 submitted applications (status-index: PK status, SK submittedAt).
+// Only ids and dates are read, never essays or emails.
+async function listQueue() {
+  const res = await docClient.send(new QueryCommand({
     TableName: TABLE(),
     IndexName: 'status-index',
     KeyConditionExpression: '#s = :submitted',
@@ -39,23 +28,33 @@ function listQueue() {
     ExpressionAttributeValues: { ':submitted': 'submitted' },
     ProjectionExpression: 'applicationId, scholarshipId, submittedAt',
     ScanIndexForward: true,
-  });
+    Limit: QUEUE_LIMIT,
+  }));
+  return res.Items || [];
 }
 
-// This reviewer's open claims (used for the max-5 rule and for "my reviews").
-function listActiveClaims(reviewerId) {
-  return queryAll({
-    TableName: TABLE(),
-    IndexName: 'status-index',
-    KeyConditionExpression: '#s = :underReview',
-    FilterExpression: 'reviewerId = :me',
-    ExpressionAttributeNames: { '#s': 'status' },
-    ExpressionAttributeValues: { ':underReview': 'under_review', ':me': reviewerId },
-    ProjectionExpression: 'applicationId, scholarshipId, claimedAt, submittedAt',
-  });
+// This reviewer's open claims, for the max 5 rule and for "my reviews". Reads every page.
+async function listActiveClaims(reviewerId) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const res = await docClient.send(new QueryCommand({
+      TableName: TABLE(),
+      IndexName: 'status-index',
+      KeyConditionExpression: '#s = :underReview',
+      FilterExpression: 'reviewerId = :me',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':underReview': 'under_review', ':me': reviewerId },
+      ProjectionExpression: 'applicationId, scholarshipId, claimedAt, submittedAt',
+      ExclusiveStartKey,
+    }));
+    items.push(...(res.Items || []));
+    ExclusiveStartKey = res.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
 }
 
-// submitted → under_review. Only succeeds if nobody else claimed it first (atomic claim).
+// submitted -> under_review, only if nobody claimed it first.
 async function claim(applicationId, reviewerId, claimedAt) {
   try {
     await docClient.send(new UpdateCommand({
@@ -73,7 +72,7 @@ async function claim(applicationId, reviewerId, claimedAt) {
   }
 }
 
-// under_review → submitted. A reviewer may only release their own claim; an admin may release anyone's (byAdmin).
+// under_review -> submitted. A reviewer can only release their own claim, an admin can release any.
 async function release(applicationId, reviewerId, byAdmin) {
   const ownerCheck = byAdmin ? '' : ' AND reviewerId = :me';
   try {
@@ -84,7 +83,8 @@ async function release(applicationId, reviewerId, byAdmin) {
       ConditionExpression: `attribute_exists(applicationId) AND #s = :underReview${ownerCheck}`,
       ExpressionAttributeNames: { '#s': 'status' },
       ExpressionAttributeValues: {
-        ':submitted': 'submitted', ':underReview': 'under_review',
+        ':submitted': 'submitted',
+        ':underReview': 'under_review',
         ...(byAdmin ? {} : { ':me': reviewerId }),
       },
     }));
@@ -95,7 +95,7 @@ async function release(applicationId, reviewerId, byAdmin) {
   }
 }
 
-// under_review → reviewed, by the claimer only. flagged = true means "no score, can only be rejected".
+// under_review -> reviewed, by the claimer only. flagged = true means no score and it can only be rejected.
 async function markReviewed(applicationId, reviewerId, flagged) {
   try {
     await docClient.send(new UpdateCommand({
@@ -113,7 +113,7 @@ async function markReviewed(applicationId, reviewerId, flagged) {
   }
 }
 
-// Undo markReviewed if writing the review itself failed, so the application is never `reviewed` without a review.
+// Undo markReviewed if saving the review failed, so an application is never reviewed without a review.
 async function undoReviewed(applicationId, reviewerId) {
   try {
     await docClient.send(new UpdateCommand({
