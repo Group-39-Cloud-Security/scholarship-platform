@@ -1,13 +1,13 @@
-// reviewer-common.js — small helpers shared by the three reviewer pages
-// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §10 (textContent only, token in sessionStorage, 401 → login)
+// reviewer-common.js - helpers shared by the three reviewer pages
+// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §10 (textContent only, token in sessionStorage, 401 goes back to login)
 //
-// Until the shared shell (js/api.js, js/auth.js) is built in Phase C, the reviewer pages use this helper so they
-// work on their own. Everything is inside one object so nothing clashes with the shell's global names.
-// Security: the DOM is only ever built with createElement + textContent (never innerHTML), so an essay or
-// title containing <script> is shown as text, not run.
+// The shared js/api.js and js/auth.js are not built yet (Phase C), so the reviewer pages use these helpers.
+// Everything is inside ReviewerUI so the names can't clash with the shared files later.
+// Pages are only built with createElement + textContent, never innerHTML, so text from the database
+// (essays, titles) is always shown as text and never run as HTML.
 
 const ReviewerUI = (() => {
-  const TOKEN_KEY = 'token'; // same key the shared auth.js uses for sessionStorage
+  const TOKEN_KEY = 'token';
   const LOGIN_PAGE = '../index.html';
   const ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
   const apiBase = typeof FLOCI_API !== 'undefined' ? FLOCI_API : ''; // FLOCI_API comes from js/config.js
@@ -21,12 +21,12 @@ const ReviewerUI = (() => {
     window.location.replace(LOGIN_PAGE);
   }
 
-  // No token → straight to login. The backend still checks the role on every call (hiding a page is not security).
+  // No token: go to the login page. The backend still checks the role on every call.
   function guard() {
     if (!token()) toLogin();
   }
 
-  // fetch + JSON. Returns the parsed body (or null for 204). Throws Error(<API message>) on any error status.
+  // Calls the API and returns the JSON body (null for 204). Throws an Error with the API's message.
   async function api(path, { method = 'GET', body } = {}) {
     const headers = { Authorization: `Bearer ${token()}` };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -36,7 +36,7 @@ const ReviewerUI = (() => {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-        credentials: 'omit', // the token goes in the header, never in cookies
+        credentials: 'omit',
         cache: 'no-store',
       });
     } catch {
@@ -50,21 +50,17 @@ const ReviewerUI = (() => {
     let data = null;
     try { data = await res.json(); } catch { /* not JSON */ }
     if (!res.ok) {
-      const message = data && data.error && data.error.message ? data.error.message : `Request failed (${res.status}).`;
-      const err = new Error(message);
+      const err = new Error(data && data.error ? data.error.message : `Request failed (${res.status}).`);
       err.status = res.status;
       throw err;
     }
     return data;
   }
 
-  // Tiny DOM builder: el('td', { className: 'num' }, 'text', childNode, ...). Text children become text nodes.
+  // el('td', { className: 'num' }, 'some text', otherNode) - text children become text nodes.
   function el(tag, props = {}, ...children) {
     const node = document.createElement(tag);
-    Object.entries(props).forEach(([k, v]) => {
-      if (k === 'dataset') Object.assign(node.dataset, v);
-      else node[k] = v;
-    });
+    Object.assign(node, props);
     children.flat().forEach((c) => {
       if (c === null || c === undefined || c === false) return;
       node.append(c instanceof Node ? c : document.createTextNode(String(c)));
@@ -79,22 +75,21 @@ const ReviewerUI = (() => {
   }
 
   function formatDate(iso) {
-    if (!iso) return '—';
+    if (!iso) return '-';
     const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString();
   }
 
-  // Time left on a claim, e.g. "31 h 05 min left" or "expired".
+  // e.g. "31 h 05 min left" or "expired"
   function timeLeft(expiresAt) {
     const ms = Date.parse(expiresAt) - Date.now();
-    if (!Number.isFinite(ms)) return '—';
+    if (!Number.isFinite(ms)) return '-';
     if (ms <= 0) return 'expired';
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
     return `${h} h ${String(m).padStart(2, '0')} min left`;
   }
 
-  // Only ids that look like ours ever go into a URL.
   function validId(id) {
     return typeof id === 'string' && ID_PATTERN.test(id);
   }
@@ -103,27 +98,12 @@ const ReviewerUI = (() => {
     return el('a', { href: `review.html?id=${encodeURIComponent(applicationId)}` }, text);
   }
 
-  // Only plain http(s) links are ever opened (never javascript: or data: URLs).
-  function safeUrl(url) {
+  // Opens a link from the API in a new tab. Only http(s) links, and the new tab gets no access to this page.
+  function openLink(url) {
     let parsed;
-    try { parsed = new URL(url); } catch { return null; }
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null;
-  }
-
-  // Opens a link that is only known after an API call. The tab is opened right away on the click (so popup
-  // blockers allow it), cut off from this page (opener = null), and only then sent to the link.
-  async function openAfter(getUrl) {
-    const tab = window.open('', '_blank');
-    if (tab) tab.opener = null;
-    try {
-      const url = safeUrl(await getUrl());
-      if (!url) throw new Error('The server returned an invalid link.');
-      if (tab) tab.location.replace(url);
-      else window.location.assign(url); // popups blocked: open it here instead
-    } catch (err) {
-      if (tab) tab.close();
-      throw err;
-    }
+    try { parsed = new URL(url); } catch { throw new Error('The server returned an invalid link.'); }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('The server returned an invalid link.');
+    window.open(parsed.href, '_blank', 'noopener,noreferrer');
   }
 
   function wireLogout() {
@@ -131,5 +111,5 @@ const ReviewerUI = (() => {
     if (btn) btn.addEventListener('click', toLogin);
   }
 
-  return { api, el, guard, showMessage, formatDate, timeLeft, validId, reviewLink, openAfter, wireLogout };
+  return { api, el, guard, showMessage, formatDate, timeLeft, validId, reviewLink, openLink, wireLogout };
 })();

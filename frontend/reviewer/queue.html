@@ -1,19 +1,19 @@
-<!-- reviewer/queue.html — Owner: Mohamed Hazem. Applications waiting for a reviewer; claim one to start reviewing. -->
+<!-- reviewer/queue.html - Owner: Mohamed Hazem. Applications waiting for a reviewer; claim one to start reviewing. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Only our own files may run; the page may only call our API (Floci). No inline scripts or styles anywhere. -->
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <title>Review queue · Scholarship Platform</title>
+  <title>Review queue | Scholarship Platform</title>
   <link rel="stylesheet" href="../css/style.css">
   <link rel="stylesheet" href="reviewer.css">
 </head>
 <body>
   <header class="topbar">
-    <strong>Scholarship Platform · Reviewer</strong>
+    <strong>Scholarship Platform - Reviewer</strong>
     <nav id="nav" aria-label="Main">
       <a href="queue.html">Queue</a>
       <a href="my-reviews.html">My reviews</a>

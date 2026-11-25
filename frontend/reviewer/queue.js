@@ -1,4 +1,4 @@
-// queue.js — logic for reviewer/queue.html: list the queue, claim an application, go to its review page
+// queue.js - logic for reviewer/queue.html: list the queue, claim an application, go to its review page
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §8 (GET /api/reviews/queue, POST /api/reviews), §10 (textContent only)
 
 (() => {

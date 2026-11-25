@@ -1,4 +1,4 @@
-// my-reviews.js — logic for reviewer/my-reviews.html: open claims (time left, release) + submitted reviews
+// my-reviews.js - logic for reviewer/my-reviews.html: open claims (time left, release) + submitted reviews
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §8 (GET /api/reviews/mine, DELETE /api/reviews/{id}), §10
 
 (() => {

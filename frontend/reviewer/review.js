@@ -1,9 +1,9 @@
-// review.js — logic for reviewer/review.html?id=<applicationId>
-// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing, §8 (GET/PUT/DELETE /api/reviews/{id}, GET …/pdf), §10
-// The total shown here is only a preview: the server recalculates it and ignores anything the page sends.
+// review.js - logic for reviewer/review.html?id=<applicationId>
+// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing, §8 (GET/PUT/DELETE /api/reviews/{id}, GET .../pdf), §10
+// The total on this page is only a preview. The server calculates the real one.
 
 (() => {
-  const { api, el, guard, showMessage, formatDate, timeLeft, validId, openAfter, wireLogout } = ReviewerUI;
+  const { api, el, guard, showMessage, formatDate, timeLeft, validId, openLink, wireLogout } = ReviewerUI;
   guard();
   wireLogout();
 
@@ -26,7 +26,7 @@
     if (Array.isArray(e.allowedDomains) && e.allowedDomains.length) parts.push(`email domains: ${e.allowedDomains.join(', ')}`);
     if (typeof e.minGpa === 'number') parts.push(`minimum GPA: ${e.minGpa}`);
     if (Array.isArray(e.years) && e.years.length) parts.push(`years of study: ${e.years.join(', ')}`);
-    return parts.length ? `Check the PDF against: ${parts.join(' · ')}. Flag as "Ineligible" if it doesn't match.` : 'No eligibility rules recorded.';
+    return parts.length ? `Check the PDF against: ${parts.join(', ')}. Flag as "Ineligible" if it doesn't match.` : 'No eligibility rules recorded.';
   }
 
   function renderRubric() {
@@ -37,7 +37,6 @@
         type: 'number', min: 0, max: 10, step: 1, required: true, inputMode: 'numeric',
         id: `score-${c.criterionId}`, className: 'score',
       });
-      input.dataset.criterionId = c.criterionId;
       input.addEventListener('input', updatePreview);
       tbody.append(el('tr', {},
         el('td', {}, el('label', { htmlFor: input.id }, c.name), el('div', { className: 'hint' }, c.description || '')),
@@ -66,7 +65,7 @@
       const total = rubric.reduce((sum, c) => sum + scores[c.criterionId] * c.weight, 0) / 10;
       $('total-preview').textContent = String(Math.round(total * 100) / 100);
     } catch {
-      $('total-preview').textContent = '—';
+      $('total-preview').textContent = '-';
     }
   }
 
@@ -79,7 +78,7 @@
       if (review.flagNote) row('Note', review.flagNote);
     } else {
       row('Total score', `${review.totalScore} / 100`);
-      rubric.forEach((c) => row(c.name, String(review.scores ? review.scores[c.criterionId] : '—')));
+      rubric.forEach((c) => row(c.name, String(review.scores ? review.scores[c.criterionId] : '-')));
     }
     if (review.comment) row('Comment', review.comment);
     row('Submitted', formatDate(review.submittedAt));
@@ -97,8 +96,8 @@
       rubric = scholarship && Array.isArray(scholarship.rubric) ? scholarship.rubric : [];
 
       $('title').textContent = scholarship ? `Review: ${scholarship.title}` : 'Review application';
-      $('gpa').textContent = String(app.gpa ?? '—');
-      $('year').textContent = String(app.yearOfStudy ?? '—');
+      $('gpa').textContent = String(app.gpa ?? '-');
+      $('year').textContent = String(app.yearOfStudy ?? '-');
       $('submitted').textContent = formatDate(app.submittedAt);
       $('eligibility').textContent = renderEligibility(scholarship && scholarship.eligibility);
       $('essay').textContent = app.essay || ''; // CSS keeps line breaks; textContent keeps any HTML as plain text
@@ -107,7 +106,7 @@
       const underReview = app.status === 'under_review';
       $('pdf').hidden = !(underReview && app.hasPdf);
       $('claim-info').textContent = underReview
-        ? `Claimed ${formatDate(app.claimedAt)} · ${timeLeft(app.expiresAt)} before it goes back to the queue.`
+        ? `Claimed ${formatDate(app.claimedAt)}, ${timeLeft(app.expiresAt)} before it goes back to the queue.`
         : `Status: ${app.status.replace('_', ' ')}`;
 
       $('score-section').hidden = !underReview;
@@ -170,7 +169,8 @@
   $('pdf').addEventListener('click', async () => {
     showMessage(message, '');
     try {
-      await openAfter(async () => (await api(`${path}/pdf`)).url);
+      const { url } = await api(`${path}/pdf`);
+      openLink(url);
     } catch (err) {
       showMessage(message, err.message);
     }

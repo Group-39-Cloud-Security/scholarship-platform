@@ -1,19 +1,19 @@
-<!-- reviewer/review.html — Owner: Mohamed Hazem. Read one claimed application and score it against the rubric, or flag it. -->
+<!-- reviewer/review.html - Owner: Mohamed Hazem. Read one claimed application and score it against the rubric, or flag it. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Only our own files may run; the page may only call our API (Floci). No inline scripts or styles anywhere. -->
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
-  <title>Review application · Scholarship Platform</title>
+  <title>Review application | Scholarship Platform</title>
   <link rel="stylesheet" href="../css/style.css">
   <link rel="stylesheet" href="reviewer.css">
 </head>
 <body>
   <header class="topbar">
-    <strong>Scholarship Platform · Reviewer</strong>
+    <strong>Scholarship Platform - Reviewer</strong>
     <nav id="nav" aria-label="Main">
       <a href="queue.html">Queue</a>
       <a href="my-reviews.html">My reviews</a>
@@ -44,10 +44,10 @@
       <p class="hint">Give every criterion a whole number from 0 to 10. The server calculates the weighted total. A submitted review is final.</p>
       <form id="score-form" novalidate>
         <table id="rubric">
-          <thead><tr><th>Criterion</th><th>Weight</th><th>Score (0–10)</th></tr></thead>
+          <thead><tr><th>Criterion</th><th>Weight</th><th>Score (0-10)</th></tr></thead>
           <tbody></tbody>
         </table>
-        <p>Total (preview): <strong id="total-preview">—</strong> / 100</p>
+        <p>Total (preview): <strong id="total-preview">-</strong> / 100</p>
         <label for="comment">Comment for the admin (optional, max 1000 characters)</label>
         <textarea id="comment" maxlength="1000" rows="3"></textarea>
         <p><button type="submit">Submit scores</button></p>
@@ -57,7 +57,7 @@
       <form id="flag-form" novalidate>
         <label for="flag-reason">Reason</label>
         <select id="flag-reason" required>
-          <option value="">Choose a reason…</option>
+          <option value="">Choose a reason</option>
           <option value="incomplete_documents">Incomplete documents</option>
           <option value="ineligible">Ineligible</option>
           <option value="plagiarism_suspected">Plagiarism suspected</option>
