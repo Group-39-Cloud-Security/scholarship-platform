@@ -1,9 +1,9 @@
-// handler.js — release-expired-claims, run every hour by EventBridge Scheduler (release-expired-claims-hourly)
-// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing (claims expire after 48 h), §7 (release-expired-claims-role)
+// handler.js - release-expired-claims, run every hour by EventBridge Scheduler (release-expired-claims-hourly)
+// Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing, §7 (release-expired-claims-role)
 //
-// Finds `under_review` applications claimed more than 48 h ago and puts them back in the queue.
-// Each release is a conditional update that also checks claimedAt is still the value we read, so a claim
-// made or renewed in between is never touched. No HTTP, no req/res: the scheduler invokes it directly.
+// Finds under_review applications claimed more than 48 hours ago and puts them back in the queue.
+// The update checks that claimedAt is still the value we read, so a claim that changed in the
+// meantime (reviewed, released, claimed again) is never touched.
 
 const { QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamo');
@@ -50,22 +50,20 @@ async function releaseOne(app) {
     action: 'claim_expired',
     userId: 'system',
     targetId: app.applicationId,
-    detail: `claim by ${app.reviewerId} released after ${CLAIM_HOURS} h`,
+    detail: `claim by ${app.reviewerId} released after ${CLAIM_HOURS}h`,
   });
   return true;
 }
 
-// `now` can be passed in a test event ({ "now": "2026-12-01T00:00:00Z" }) to check the job without waiting 48 h.
-exports.handler = async (event = {}) => {
-  const now = event.now ? new Date(event.now) : new Date();
-  if (Number.isNaN(now.getTime())) throw new Error('event.now is not a valid date');
-  const cutoff = new Date(now.getTime() - CLAIM_HOURS * 3600 * 1000).toISOString();
-
+// The event from the scheduler is ignored: the cutoff always comes from the real clock.
+exports.handler = async () => {
+  const cutoff = new Date(Date.now() - CLAIM_HOURS * 3600 * 1000).toISOString();
   const expired = await findExpired(cutoff);
+
   let released = 0;
   for (const app of expired) {
     if (await releaseOne(app)) released += 1;
   }
   log('info', 'release-expired-claims finished', { action: 'claim_expired', checked: expired.length, released });
-  return { checked: expired.length, released, cutoff };
+  return { checked: expired.length, released };
 };
