@@ -1,4 +1,4 @@
-// documentService.js — presigned download link for an application's PDF (AWS calls only)
+// documentService.js - presigned download link for an application's PDF (AWS calls only)
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §8 PDFs, §7 (S3 applications/*: GetObject only)
 // The bucket is never public: the reviewer gets a link that works for 5 minutes, signed with this Lambda's role.
 

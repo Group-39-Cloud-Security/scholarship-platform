@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|---|
 | T-REV-01 | review-service | GET /api/reviews/queue, no token | 401 UNAUTHENTICATED |  |  |  |
 | T-REV-02 | review-service | GET /api/reviews/queue as test-student-1 | 403 FORBIDDEN + `forbidden` in AuditLog |  |  |  |
-| T-REV-03 | review-service | GET /api/reviews/queue as test-reviewer | 200, submitted only, oldest first, no essay/email |  |  |  |
+| T-REV-03 | review-service | GET /api/reviews/queue as test-reviewer | 200, submitted only, oldest first, at most 50, no essay/email |  |  |  |
 | T-REV-04 | review-service | POST /api/reviews with Content-Type text/plain | 415 UNSUPPORTED_MEDIA_TYPE |  |  |  |
 | T-REV-05 | review-service | POST /api/reviews `{ "applicationId": "../x" }` | 400 VALIDATION_ERROR |  |  |  |
 | T-REV-06 | review-service | POST /api/reviews unknown applicationId | 404 APPLICATION_NOT_FOUND |  |  |  |
@@ -20,8 +20,8 @@
 | T-REV-16 | review-service | DELETE own claim | 204, application back to `submitted`, reviewerId/claimedAt removed |  |  |  |
 | T-REV-17 | review-service | DELETE as test-admin on any claim | 204; second time 409 |  |  |  |
 | T-REV-18 | review-service | DELETE as test-student-1 | 403 FORBIDDEN |  |  |  |
-| T-REV-19 | review-service | GET /api/reviews/{id}/pdf while under review | 200, presigned URL, expiresIn 300; URL not in logs |  |  |  |
-| T-REV-20 | review-service | Invoke release-expired-claims with claims 49 h and 47 h old | 49 h → submitted + `claim_expired` audit; 47 h unchanged |  |  |  |
+| T-REV-19 | review-service | GET /api/reviews/{id}/pdf while under review | 200, presigned URL, expiresIn 300, `pdf_download` in AuditLog, URL not in logs |  |  |  |
+| T-REV-20 | review-service | Invoke release-expired-claims with claims 49 h and 47 h old | the 49 h one goes back to submitted with `claim_expired` in AuditLog, the 47 h one is unchanged |  |  |  |
 | T-REV-21 | review-service | OPTIONS /api/reviews/queue from http://localhost:4566 | 204 with Access-Control-Allow-Origin |  |  |  |
 | T-REV-22 | review-service | GET with Origin http://evil.example | no Access-Control-Allow-Origin header |  |  |  |
 | T-REV-23 | review-service | Any review response | X-Content-Type-Options nosniff, X-Frame-Options DENY, CSP default-src 'none', no X-Powered-By |  |  |  |

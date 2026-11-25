@@ -1,4 +1,4 @@
-// reviewService.js — the Reviews table (AWS calls only, never req/res)
+// reviewService.js - the Reviews table (AWS calls only, never req/res)
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §5 (Reviews), §6 (a submitted review is final)
 
 const { GetCommand, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');

@@ -1,4 +1,4 @@
-// scholarshipReadService.js — read-only GetItem on Scholarships (the rubric). review-service never writes it.
+// scholarshipReadService.js - read-only GetItem on Scholarships (the rubric). review-service never writes it.
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §5, §7 (Scholarships: GetItem only)
 
 const { GetCommand } = require('@aws-sdk/lib-dynamodb');

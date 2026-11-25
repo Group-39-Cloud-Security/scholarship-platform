@@ -1,4 +1,4 @@
-// scoring.js — pure rubric validation + total calculation (no AWS, no req/res, so it is easy to unit-test)
+// scoring.js - rubric validation and the total score (no AWS and no req/res, so it is easy to unit test)
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §6 Reviewing
 
 const { validationError } = require('../../shared/errors');
@@ -8,11 +8,11 @@ const FLAG_REASONS = ['incomplete_documents', 'ineligible', 'plagiarism_suspecte
 const MAX_FLAG_NOTE = 500;
 const MAX_COMMENT = 1000;
 
-// Every rubric criterion must get a whole number 0–10, and nothing that is not in the rubric.
-// Returns a clean { criterionId: score } map built from the rubric, so extra keys can never reach the database.
+// Every rubric criterion needs a whole number from 0 to 10, and nothing that isn't in the rubric.
+// The result is built from the rubric, so extra keys from the client never reach the database.
 function validateScores(rubric, scores) {
   if (!scores || typeof scores !== 'object' || Array.isArray(scores)) {
-    throw validationError('Scores must be an object of criterionId → score.');
+    throw validationError('Scores must be an object of criterionId to score.');
   }
   const known = new Set(rubric.map((c) => c.criterionId));
   const extra = Object.keys(scores).filter((id) => !known.has(id));
@@ -28,27 +28,26 @@ function validateScores(rubric, scores) {
   return clean;
 }
 
-// totalScore = Σ(score × weight) / 10 → 0–100 (weights sum to 100, scores are 0–10).
-// Calculated by the server only; a total sent by the client is never read.
+// total = sum of (score * weight) / 10, so it is out of 100 because the weights add up to 100.
+// Only the server calculates it; a total sent by the client is never read.
 function totalScore(rubric, cleanScores) {
   const sum = rubric.reduce((acc, c) => acc + cleanScores[c.criterionId] * c.weight, 0);
-  return Math.round((sum / 10) * 100) / 100; // keep 2 decimals, e.g. 78.5
+  return Math.round((sum / 10) * 100) / 100;
 }
 
-// A flag replaces the scores: reason from the fixed list, optional note ≤ 500 characters.
+// Empty or only spaces counts as "not given" for the optional text fields.
+const isBlank = (value) => value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+// A flag replaces the scores: a reason from the fixed list and an optional note (max 500 characters).
 function validateFlag(body) {
   const flagReason = checkEnum(body.flagReason, 'Flag reason', FLAG_REASONS);
-  let flagNote;
-  if (body.flagNote !== undefined && body.flagNote !== null && body.flagNote !== '') {
-    flagNote = checkText(body.flagNote, 'Flag note', 1, MAX_FLAG_NOTE);
-  }
+  const flagNote = isBlank(body.flagNote) ? undefined : checkText(body.flagNote, 'Flag note', 1, MAX_FLAG_NOTE);
   return { flagReason, flagNote };
 }
 
-// Optional reviewer comment shown to the admin only.
+// Optional comment for the admin (max 1000 characters).
 function validateComment(value) {
-  if (value === undefined || value === null || value === '') return undefined;
-  return checkText(value, 'Comment', 1, MAX_COMMENT);
+  return isBlank(value) ? undefined : checkText(value, 'Comment', 1, MAX_COMMENT);
 }
 
 module.exports = { validateScores, totalScore, validateFlag, validateComment, FLAG_REASONS };

@@ -1,6 +1,6 @@
-// app.js — builds the Express app (no listen). server.js runs it locally, lambda.js wraps it for Lambda.
+// app.js - builds the Express app (no listen). server.js runs it locally, lambda.js wraps it for Lambda.
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §9 pattern
-// Order matters (§9): requestLogger → securityHeaders → cors → express.json → fixBody → routes → 404 → errorHandler
+// Order matters (§9): requestLogger, securityHeaders, cors, express.json, fixBody, routes, 404, errorHandler
 
 const express = require('express');
 const cors = require('cors');

@@ -1,4 +1,4 @@
-// reviews.js — method + path + role, nothing else (§9). Mounted at /api/reviews in app.js.
+// reviews.js - method + path + role, nothing else (§9). Mounted at /api/reviews in app.js.
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §8
 // /queue and /mine come before /:applicationId so Express doesn't read "queue" as an id.
 
@@ -7,7 +7,7 @@ const { authenticate, requireRole } = require('../../shared/auth');
 const c = require('../controllers/reviews');
 
 const router = express.Router();
-router.use(authenticate); // every review route needs a valid token → 401 otherwise
+router.use(authenticate); // every review route needs a valid token, otherwise 401
 
 router.get('/queue', requireRole('reviewer'), c.viewQueue);
 router.post('/', requireRole('reviewer'), c.claimApplication);
