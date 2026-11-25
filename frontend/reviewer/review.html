@@ -1,2 +1,83 @@
-<!-- reviewer/review.html — Owner: Mohamed Hazem. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- reviewer/review.html — Owner: Mohamed Hazem. Read one claimed application and score it against the rubric, or flag it. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Only our own files may run; the page may only call our API (Floci). No inline scripts or styles anywhere. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Review application · Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="reviewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform · Reviewer</strong>
+    <nav id="nav" aria-label="Main">
+      <a href="queue.html">Queue</a>
+      <a href="my-reviews.html">My reviews</a>
+      <button type="button" id="logout" class="link">Log out</button>
+    </nav>
+  </header>
+  <main>
+    <h1 id="title">Review application</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <section id="details" hidden>
+      <p id="claim-info" class="hint"></p>
+      <h2>Application</h2>
+      <dl class="facts">
+        <dt>Declared GPA</dt><dd id="gpa"></dd>
+        <dt>Year of study</dt><dd id="year"></dd>
+        <dt>Submitted</dt><dd id="submitted"></dd>
+      </dl>
+      <h3>Eligibility rules</h3>
+      <p id="eligibility" class="hint"></p>
+      <p><button type="button" id="pdf">Open PDF (link valid 5 minutes)</button></p>
+      <h3>Essay</h3>
+      <div id="essay" class="essay"></div>
+    </section>
+
+    <section id="score-section" hidden>
+      <h2>Score against the rubric</h2>
+      <p class="hint">Give every criterion a whole number from 0 to 10. The server calculates the weighted total. A submitted review is final.</p>
+      <form id="score-form" novalidate>
+        <table id="rubric">
+          <thead><tr><th>Criterion</th><th>Weight</th><th>Score (0–10)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p>Total (preview): <strong id="total-preview">—</strong> / 100</p>
+        <label for="comment">Comment for the admin (optional, max 1000 characters)</label>
+        <textarea id="comment" maxlength="1000" rows="3"></textarea>
+        <p><button type="submit">Submit scores</button></p>
+      </form>
+
+      <h2>Or flag instead of scoring</h2>
+      <form id="flag-form" novalidate>
+        <label for="flag-reason">Reason</label>
+        <select id="flag-reason" required>
+          <option value="">Choose a reason…</option>
+          <option value="incomplete_documents">Incomplete documents</option>
+          <option value="ineligible">Ineligible</option>
+          <option value="plagiarism_suspected">Plagiarism suspected</option>
+          <option value="other">Other</option>
+        </select>
+        <label for="flag-note">Note (optional, max 500 characters)</label>
+        <textarea id="flag-note" maxlength="500" rows="2"></textarea>
+        <p><button type="submit" class="danger">Flag application</button></p>
+      </form>
+
+      <p><button type="button" id="release" class="secondary">Release back to the queue</button></p>
+    </section>
+
+    <section id="result-section" hidden>
+      <h2>Your review (final)</h2>
+      <dl class="facts" id="result"></dl>
+    </section>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="reviewer-common.js"></script>
+  <script src="review.js"></script>
+</body>
+</html>

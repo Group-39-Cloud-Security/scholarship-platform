@@ -1,0 +1,25 @@
+/* reviewer.css — layout for the reviewer pages only. Owner: Mohamed Hazem. Colours and fonts come from ../css/style.css. */
+body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5; }
+main { max-width: 900px; margin: 0 auto; padding: 1rem; }
+.topbar { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid #ccc; }
+.topbar nav { display: flex; gap: 1rem; align-items: center; }
+table { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+td.num { white-space: nowrap; }
+.mono { font-family: ui-monospace, monospace; }
+.hint { color: #555; font-size: .9rem; margin: .2rem 0; }
+.message { padding: .5rem .75rem; border-radius: 4px; }
+.message.error { background: #fde8e8; color: #8a1c1c; }
+.message.success { background: #e6f6ea; color: #1d5e2c; }
+.essay { white-space: pre-wrap; border: 1px solid #ddd; padding: .75rem; border-radius: 4px; max-height: 24rem; overflow: auto; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+input.score { width: 4.5rem; }
+label { display: block; margin-top: .5rem; }
+textarea, select { width: 100%; max-width: 100%; box-sizing: border-box; }
+button { cursor: pointer; padding: .35rem .8rem; }
+button.link { background: none; border: none; color: inherit; text-decoration: underline; padding: 0; }
+button.danger { background: #8a1c1c; color: #fff; border: none; }
+button.secondary { background: none; border: 1px solid #888; }
+button:disabled { opacity: .6; cursor: default; }
