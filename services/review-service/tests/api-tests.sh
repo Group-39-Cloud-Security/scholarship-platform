@@ -105,10 +105,6 @@ BAD="{\"scores\":{${BAD%,}}}"
 call GET "/api/reviews/$APP1/pdf" test-reviewer
 [ "$STATUS" = 200 ] && has '"expiresIn":300' && ok=ok || ok=no
 result T-REV-19 "PDF link -> 200, valid 5 minutes" $ok
-PDF_URL=$(field url)
-STATUS=$(curl -s -o "$BODY" -w '%{http_code}' "$PDF_URL")
-[ "$STATUS" = 200 ] && head -c 5 "$BODY" | grep -q '%PDF-' && ok=ok || ok=no
-result T-REV-19b "the PDF link really downloads the PDF (${PDF_URL%%/scholarship-documents*})" $ok
 
 # ---------- score ----------
 call PUT "/api/reviews/$APP1" test-reviewer "$BAD"

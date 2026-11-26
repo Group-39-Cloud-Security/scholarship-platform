@@ -57,7 +57,7 @@ Lambda handlers: `src/lambda.handler` (review-service) and `handler.handler` (re
 
 ## Known limits
 - The 5 claim limit counts claims and then claims, and the count reads a GSI, which can be a moment behind. A reviewer clicking very fast could end up with 6. The claim itself is still safe (one reviewer per application). A fully atomic limit needs a counter on `Users`, which is a shared table, so it's for the team to decide.
-- The presigned PDF link uses the endpoint the Lambda gets from Floci. If that is an internal host name, the browser can't open it and the host must be changed to `localhost:4566`. application-service has the same issue (Phase B).
+- On Floci the presigned PDF link starts with `http://floci:4566` (Floci's name inside Docker), so the browser can't open it unless the laptop maps that name, for example a `127.0.0.1 floci` line in the hosts file. On real AWS the link points to S3 directly. application-service has the same issue (Phase B).
 
 ## Needs from other services
 - `Applications.status-index` (Khalil) must include `scholarshipId`, `reviewerId` and `claimedAt` (projection `ALL` is simplest), because the queue, my reviews and the expiry job read them from the index.
