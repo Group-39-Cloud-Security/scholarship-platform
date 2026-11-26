@@ -8,12 +8,12 @@
 const { GetCommand, QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('../../shared/dynamo');
 
-const TABLE = () => process.env.APPLICATIONS_TABLE;
+const TABLE = process.env.APPLICATIONS_TABLE;
 const QUEUE_LIMIT = 50;
 const isConditionFail = (err) => err.name === 'ConditionalCheckFailedException';
 
 async function getApplication(applicationId) {
-  const res = await docClient.send(new GetCommand({ TableName: TABLE(), Key: { applicationId } }));
+  const res = await docClient.send(new GetCommand({ TableName: TABLE, Key: { applicationId } }));
   return res.Item || null;
 }
 
@@ -21,7 +21,7 @@ async function getApplication(applicationId) {
 // Only ids and dates are read, never essays or emails.
 async function listQueue() {
   const res = await docClient.send(new QueryCommand({
-    TableName: TABLE(),
+    TableName: TABLE,
     IndexName: 'status-index',
     KeyConditionExpression: '#s = :submitted',
     ExpressionAttributeNames: { '#s': 'status' },
@@ -39,7 +39,7 @@ async function listActiveClaims(reviewerId) {
   let ExclusiveStartKey;
   do {
     const res = await docClient.send(new QueryCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       IndexName: 'status-index',
       KeyConditionExpression: '#s = :underReview',
       FilterExpression: 'reviewerId = :me',
@@ -58,7 +58,7 @@ async function listActiveClaims(reviewerId) {
 async function claim(applicationId, reviewerId, claimedAt) {
   try {
     await docClient.send(new UpdateCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       Key: { applicationId },
       UpdateExpression: 'SET #s = :underReview, reviewerId = :me, claimedAt = :now',
       ConditionExpression: 'attribute_exists(applicationId) AND #s = :submitted',
@@ -77,7 +77,7 @@ async function release(applicationId, reviewerId, byAdmin) {
   const ownerCheck = byAdmin ? '' : ' AND reviewerId = :me';
   try {
     await docClient.send(new UpdateCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       Key: { applicationId },
       UpdateExpression: 'SET #s = :submitted REMOVE reviewerId, claimedAt',
       ConditionExpression: `attribute_exists(applicationId) AND #s = :underReview${ownerCheck}`,
@@ -99,7 +99,7 @@ async function release(applicationId, reviewerId, byAdmin) {
 async function markReviewed(applicationId, reviewerId, flagged) {
   try {
     await docClient.send(new UpdateCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       Key: { applicationId },
       UpdateExpression: 'SET #s = :reviewed, flagged = :flagged',
       ConditionExpression: 'attribute_exists(applicationId) AND #s = :underReview AND reviewerId = :me',
@@ -117,7 +117,7 @@ async function markReviewed(applicationId, reviewerId, flagged) {
 async function undoReviewed(applicationId, reviewerId) {
   try {
     await docClient.send(new UpdateCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       Key: { applicationId },
       UpdateExpression: 'SET #s = :underReview REMOVE flagged',
       ConditionExpression: '#s = :reviewed AND reviewerId = :me',

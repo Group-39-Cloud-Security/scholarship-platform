@@ -48,13 +48,13 @@ ensure_role release-expired-claims-role
 ensure_role scheduler-invoke-role
 
 # ---------- 3. Lambda functions ----------
-# $1 name · $2 handler · $3 zip file · $4 environment JSON
+# $1 name, $2 handler, $3 zip file, $4 environment JSON
 ensure_function() {
   local zip; zip="$(winpath "$SERVICE_DIR/$3")"
   if aws lambda get-function --function-name "$1" >/dev/null 2>&1; then
     aws lambda update-function-code --function-name "$1" --zip-file "fileb://$zip" >/dev/null
     aws lambda wait function-updated --function-name "$1" 2>/dev/null || sleep 2
-    aws lambda update-function-configuration --function-name "$1" --handler "$2" \
+    aws lambda update-function-configuration --function-name "$1" --runtime nodejs24.x --handler "$2" \
       --environment "$4" --timeout 15 --memory-size 256 >/dev/null
     echo "updated function $1"
   else
@@ -144,4 +144,4 @@ else
   echo "WARNING: could not create the CloudWatch metric filter/alarm (check Floci support)."
 fi
 
-echo "review-service deployed · API: $API_URL/api/reviews"
+echo "review-service deployed, API: $API_URL/api/reviews"

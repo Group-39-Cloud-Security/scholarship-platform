@@ -4,14 +4,14 @@
 const { GetCommand, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('../../shared/dynamo');
 
-const TABLE = () => process.env.REVIEWS_TABLE;
+const TABLE = process.env.REVIEWS_TABLE;
 
 // One review per application. attribute_not_exists makes it write-once: a second submit can never overwrite it,
 // and there is no update or delete function at all (scores locked after submission).
 async function createReview(review) {
   try {
     await docClient.send(new PutCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       Item: review,
       ConditionExpression: 'attribute_not_exists(applicationId)',
     }));
@@ -23,7 +23,7 @@ async function createReview(review) {
 }
 
 async function getReview(applicationId) {
-  const res = await docClient.send(new GetCommand({ TableName: TABLE(), Key: { applicationId } }));
+  const res = await docClient.send(new GetCommand({ TableName: TABLE, Key: { applicationId } }));
   return res.Item || null;
 }
 
@@ -33,7 +33,7 @@ async function listByReviewer(reviewerId) {
   let ExclusiveStartKey;
   do {
     const res = await docClient.send(new QueryCommand({
-      TableName: TABLE(),
+      TableName: TABLE,
       IndexName: 'reviewerId-index',
       KeyConditionExpression: 'reviewerId = :me',
       ExpressionAttributeValues: { ':me': reviewerId },
