@@ -3,7 +3,7 @@
 # Only for local testing, the real test data is platform/seed.sh. Run from the repo root AFTER deploy-all.sh:
 #   bash services/review-service/tests/local-test-data.sh
 # Creates (only if missing) the Applications and Scholarships tables exactly as CLAUDE.md section 5 describes,
-# the private scholarship-documents bucket, 1 scholarship with a rubric, 4 submitted applications with a small PDF,
+# the private scholarship-documents bucket, 1 scholarship with a rubric, 8 submitted applications with a small PDF,
 # and 1 claim that is 49 hours old (to test the release-expired-claims job).
 # When Khalil's and Wael's parts are ready: bash platform/reset.sh && bash platform/deploy-all.sh (wipes all of this).
 set -e
@@ -83,18 +83,22 @@ EOF
   aws s3 cp "$TMP/test.pdf" "s3://scholarship-documents/applications/$1.pdf" --content-type application/pdf >/dev/null
 }
 # remove old reviews of these test applications so every run starts clean
-for n in 1 2 3 4 5; do
+for n in 1 2 3 4 5 6 7 8 9; do
   aws dynamodb delete-item --table-name Reviews --key "{\"applicationId\":{\"S\":\"4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e7$n\"}}" >/dev/null 2>&1 || true
 done
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 submitted 2026-11-20T10:00:00.000Z ""
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 submitted 2026-11-21T10:00:00.000Z ""
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e73 submitted 2026-11-22T10:00:00.000Z ""
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e74 submitted 2026-11-23T10:00:00.000Z ""
+add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e76 submitted 2026-11-24T10:00:00.000Z ""
+add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e77 submitted 2026-11-24T11:00:00.000Z ""
+add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e78 submitted 2026-11-24T12:00:00.000Z ""
+add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e79 submitted 2026-11-24T13:00:00.000Z ""
 # claimed 49 hours ago by another reviewer: the hourly job should put it back in the queue
 OLD=$(node -e "process.stdout.write(new Date(Date.now() - 49 * 3600 * 1000).toISOString())")
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e75 under_review 2026-11-19T10:00:00.000Z \
   ", \"reviewerId\": {\"S\": \"old-reviewer\"}, \"claimedAt\": {\"S\": \"$OLD\"}"
-echo "added 4 submitted applications + 1 expired claim (with PDFs)"
+echo "added 8 submitted applications + 1 expired claim (with PDFs)"
 echo
 echo "Done. Test the expiry job:  aws lambda invoke --function-name release-expired-claims out.json && cat out.json"
 echo "Website: http://localhost:4566/scholarship-web/reviewer/queue.html"

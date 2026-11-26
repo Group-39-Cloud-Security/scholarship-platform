@@ -80,7 +80,7 @@ expect T-REV-06 "claim an unknown id -> 404" 404
 call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP1\",\"reviewerId\":\"someone-else\"}"
 expect T-REV-07 "claim (reviewerId in the body is ignored) -> 201" 201
 call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP1\"}"
-expect T-REV-08 "claim the same one again -> 409" 409
+expect T-REV-07b "claim the same one again -> 409" 409
 
 call GET /api/reviews/mine test-reviewer
 [ "$STATUS" = 200 ] && has "$APP1" && ok=ok || ok=no
@@ -105,6 +105,10 @@ BAD="{\"scores\":{${BAD%,}}}"
 call GET "/api/reviews/$APP1/pdf" test-reviewer
 [ "$STATUS" = 200 ] && has '"expiresIn":300' && ok=ok || ok=no
 result T-REV-19 "PDF link -> 200, valid 5 minutes" $ok
+PDF_URL=$(field url)
+STATUS=$(curl -s -o "$BODY" -w '%{http_code}' "$PDF_URL")
+[ "$STATUS" = 200 ] && head -c 5 "$BODY" | grep -q '%PDF-' && ok=ok || ok=no
+result T-REV-19b "the PDF link really downloads the PDF (${PDF_URL%%/scholarship-documents*})" $ok
 
 # ---------- score ----------
 call PUT "/api/reviews/$APP1" test-reviewer "$BAD"
@@ -135,6 +139,37 @@ call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP2\"}"
 call PUT "/api/reviews/$APP2" test-reviewer '{"flagged":true,"flagReason":"ineligible","flagNote":"GPA in the PDF is lower"}'
 [ "$STATUS" = 200 ] && has '"flagged":true' && has '"totalScore":null' && ok=ok || ok=no
 result T-REV-15 "flag -> 200, flagged with no score" $ok
+
+# ---------- atomic claim and the 5 claim limit ----------
+call GET /api/reviews/queue test-reviewer
+LEFT=$(field applicationId)
+APP3=$(echo "$LEFT" | sed -n 1p)
+for i in 1 2 3 4 5; do   # 5 claims on the same application at the same moment
+  curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer test-reviewer" \
+    -H "Content-Type: application/json" --data "{\"applicationId\":\"$APP3\"}" \
+    "$API_URL/api/reviews" > "$TMP/parallel$i" &
+done
+wait
+WINS=$(cat "$TMP"/parallel* | grep -o 201 | wc -l)
+LOSSES=$(cat "$TMP"/parallel* | grep -o 409 | wc -l)
+STATUS="$WINS x 201, $LOSSES x 409"; echo "" > "$BODY"
+[ "$WINS" -eq 1 ] && [ "$LOSSES" -eq 4 ] && ok=ok || ok=no
+result T-REV-08 "5 claims at the same moment -> exactly one 201, four 409" $ok
+
+HELD="$APP3"
+for id in $(echo "$LEFT" | sed -n 2,5p); do   # 4 more, so I hold 5
+  call POST /api/reviews test-reviewer "{\"applicationId\":\"$id\"}"
+  [ "$STATUS" = 201 ] && HELD="$HELD $id"
+done
+SIXTH=$(echo "$LEFT" | sed -n 6p)
+if [ -n "$SIXTH" ] && [ "$(echo $HELD | wc -w)" -eq 5 ]; then
+  call POST /api/reviews test-reviewer "{\"applicationId\":\"$SIXTH\"}"
+  expect T-REV-09 "6th claim while holding 5 -> 409" 409
+else
+  STATUS="only $(echo $HELD | wc -w) claims, need 6 in the queue"; echo "" > "$BODY"
+  result T-REV-09 "6th claim while holding 5 -> 409" no
+fi
+for id in $HELD; do call DELETE "/api/reviews/$id" test-reviewer; done   # give them back
 
 # ---------- browser and headers ----------
 call OPTIONS /api/reviews/queue "" "" "" "Origin: http://localhost:4566" \
