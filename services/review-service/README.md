@@ -20,11 +20,11 @@ Request and response examples: `docs/api-contract.md` (review-service). Tests: T
 
 ## Run
 ```bash
-npm install              # also installs the expiry job's own dependencies
+npm install
 npm run sync-shared      # copies ../../shared-lib into ./shared and ./release-expired-claims/shared (gitignored)
 npm test                 # unit tests for the scoring rules
 npm run dev              # local Express on PORT (copy .env.example to .env first)
-npm run zip && npm run deploy   # builds lambda.zip + release-expired-claims.zip and deploys both to Floci
+npm run zip && npm run deploy   # installs the expiry job's own packages, builds both zips, deploys to Floci
 ```
 Lambda handlers: `src/lambda.handler` (review-service) and `handler.handler` (release-expired-claims).
 

@@ -12,7 +12,7 @@ const root = path.join(__dirname, '..');
 
 if (!fs.existsSync(path.join(root, 'node_modules', 'serverless-http'))
   || !fs.existsSync(path.join(root, 'release-expired-claims', 'node_modules', '@aws-sdk'))) {
-  console.error('Run "npm install" in this service folder first (it also installs release-expired-claims).');
+  console.error('Run "npm install" in this service folder first, then "npm run zip" (it installs release-expired-claims too).');
   process.exit(1);
 }
 if (!fs.existsSync(path.join(root, 'shared', 'VERSION')) || !fs.existsSync(path.join(root, 'release-expired-claims', 'shared', 'VERSION'))) {
