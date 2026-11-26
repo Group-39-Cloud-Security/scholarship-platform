@@ -1,7 +1,8 @@
 // Builds the two zips Lambda runs.  Usage:  npm run zip  (run npm run sync-shared first)
 //   lambda.zip                 = review-service: src/, shared/, package.json, node_modules/
-//   release-expired-claims.zip = the hourly job: handler.js, shared/, its own package.json and node_modules/
-//     (the job only needs the DynamoDB client, so it does not ship Express or the S3 client)
+//   release-expired-claims.zip = the hourly job: handler.js, shared/, its package.json and only the packages
+//     it needs (the DynamoDB client and what that depends on), taken from this folder's node_modules/,
+//     so it does not ship Express or the S3 client
 // Copied from Lab 7 (scripts/zip-lambda.js), no extra package. Contains ONLY the fixed lists below,
 // so .env, events/ and tests/ can never end up in a zip.
 const fs = require('fs');
@@ -10,9 +11,8 @@ const zlib = require('zlib');
 
 const root = path.join(__dirname, '..');
 
-if (!fs.existsSync(path.join(root, 'node_modules', 'serverless-http'))
-  || !fs.existsSync(path.join(root, 'release-expired-claims', 'node_modules', '@aws-sdk'))) {
-  console.error('Run "npm install" in this service folder first, then "npm run zip" (it installs release-expired-claims too).');
+if (!fs.existsSync(path.join(root, 'node_modules', 'serverless-http'))) {
+  console.error('Run "npm install" in this service folder first.');
   process.exit(1);
 }
 if (!fs.existsSync(path.join(root, 'shared', 'VERSION')) || !fs.existsSync(path.join(root, 'release-expired-claims', 'shared', 'VERSION'))) {
@@ -85,9 +85,25 @@ function writeZip(outputName, entries) {
 }
 
 writeZip('lambda.zip', [['src', 'src'], ['shared', 'shared'], ['package.json', 'package.json'], ['node_modules', 'node_modules']]);
+// The packages the job needs: its own dependencies plus everything they depend on, found in node_modules/.
+function jobPackages() {
+  const job = JSON.parse(fs.readFileSync(path.join(root, 'release-expired-claims', 'package.json'), 'utf8'));
+  const found = new Set();
+  const visit = (name) => {
+    if (found.has(name)) return;
+    const pkgJson = path.join(root, 'node_modules', name, 'package.json');
+    if (!fs.existsSync(pkgJson)) return; // nested copies come with their parent folder
+    found.add(name);
+    const pkg = JSON.parse(fs.readFileSync(pkgJson, 'utf8'));
+    Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies }).forEach(visit);
+  };
+  Object.keys(job.dependencies || {}).forEach(visit);
+  return [...found].sort().map((name) => [`node_modules/${name}`, `node_modules/${name}`]);
+}
+
 writeZip('release-expired-claims.zip', [
   ['release-expired-claims/handler.js', 'handler.js'],
   ['release-expired-claims/shared', 'shared'],
   ['release-expired-claims/package.json', 'package.json'],
-  ['release-expired-claims/node_modules', 'node_modules'],
+  ...jobPackages(),
 ]);
