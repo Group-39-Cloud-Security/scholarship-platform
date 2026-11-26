@@ -58,7 +58,7 @@ ensure_function() {
       --environment "$4" --timeout 15 --memory-size 256 >/dev/null
     echo "updated function $1"
   else
-    aws lambda create-function --function-name "$1" --runtime nodejs20.x --handler "$2" \
+    aws lambda create-function --function-name "$1" --runtime nodejs24.x --handler "$2" \
       --role "arn:aws:iam::$ACCOUNT:role/$1-role" --zip-file "fileb://$zip" \
       --environment "$4" --timeout 15 --memory-size 256 >/dev/null
     echo "created function $1"
