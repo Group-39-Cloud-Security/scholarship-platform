@@ -38,6 +38,8 @@ Lambda handlers: `src/lambda.handler` (review-service) and `handler.handler` (re
 ## Testing on Floci before the other services exist
 `bash services/review-service/tests/local-test-data.sh` (from the repo root, after `deploy-all.sh`) creates the Applications and Scholarships tables if they are missing, plus 1 scholarship, 4 submitted applications and 1 claim older than 48 h. Local testing only; `platform/reset.sh` removes it.
 
+`bash services/review-service/tests/api-tests.sh` resets that test data and runs every T-REV check with curl, printing PASS or FAIL for each (save the output with `| tee evidence/review-api-tests.txt`).
+
 ## Reviewer pages
 `frontend/reviewer/queue.html`, `review.html`, `my-reviews.html`. Until the shared login page exists, open the browser console on the website and run `sessionStorage.setItem('token', 'test-reviewer')`, then open `reviewer/queue.html`.
 

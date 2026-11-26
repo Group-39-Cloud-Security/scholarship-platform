@@ -82,6 +82,10 @@ EOF
   aws dynamodb put-item --table-name Applications --item "file://$TMP/app.json"
   aws s3 cp "$TMP/test.pdf" "s3://scholarship-documents/applications/$1.pdf" --content-type application/pdf >/dev/null
 }
+# remove old reviews of these test applications so every run starts clean
+for n in 1 2 3 4 5; do
+  aws dynamodb delete-item --table-name Reviews --key "{\"applicationId\":{\"S\":\"4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e7$n\"}}" >/dev/null 2>&1 || true
+done
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 submitted 2026-11-20T10:00:00.000Z ""
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 submitted 2026-11-21T10:00:00.000Z ""
 add_app 4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e73 submitted 2026-11-22T10:00:00.000Z ""
