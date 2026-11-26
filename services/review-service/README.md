@@ -35,6 +35,9 @@ Lambda handlers: `src/lambda.handler` (review-service) and `handler.handler` (re
 - schedule `release-expired-claims-hourly`
 - CloudWatch metric filter `login-failed` on `/aws/lambda/auth-service` and alarm `login-failed-spike` (more than 20 in 5 minutes)
 
+## Testing on Floci before the other services exist
+`bash services/review-service/tests/local-test-data.sh` (from the repo root, after `deploy-all.sh`) creates the Applications and Scholarships tables if they are missing, plus 1 scholarship, 4 submitted applications and 1 claim older than 48 h. Local testing only; `platform/reset.sh` removes it.
+
 ## Reviewer pages
 `frontend/reviewer/queue.html`, `review.html`, `my-reviews.html`. Until the shared login page exists, open the browser console on the website and run `sessionStorage.setItem('token', 'test-reviewer')`, then open `reviewer/queue.html`.
 
