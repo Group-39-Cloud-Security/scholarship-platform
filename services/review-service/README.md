@@ -16,7 +16,7 @@ view queue, claim, score against the rubric or flag, my reviews, release (+ hour
 | `GET /api/reviews/{applicationId}/pdf` | reviewer who claimed it | 5 minute presigned link, only while under review |
 | `release-expired-claims` (hourly) | EventBridge Scheduler | claims older than 48 h go back to the queue |
 
-Request and response examples: `docs/api-contract.md` (review-service). Tests: T-REV rows in `docs/api-test-plan.md` and `tests/requests.http`.
+Request and response examples: `docs/api-contract.md` (review-service). Tests: T-REV rows in `docs/api-test-plan.md`, `tests/requests.http`, and the Postman collection `tests/postman/review-service.postman_collection.json` (import it, run `tests/local-test-data.sh`, then run the collection in order).
 
 ## Run
 ```bash
