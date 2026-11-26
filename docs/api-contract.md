@@ -58,7 +58,7 @@ The 50 oldest `submitted` applications. No essay, student id or email.
   "expiresAt": "2026-11-28T09:00:00.000Z"
 }
 ```
-`400` missing or invalid id, bad JSON · `401` · `403` · `404 APPLICATION_NOT_FOUND` · `409` already claimed or reviewed, or the reviewer already has 5 claims · `415`
+`400` missing or invalid id, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` already claimed or reviewed, or the reviewer already has 5 claims, `415`
 
 ### GET /api/reviews/mine  [reviewer]
 ```json
@@ -138,7 +138,7 @@ or
   "submittedAt": "2026-11-26T11:20:00.000Z"
 }
 ```
-`400` missing, extra or out of range score, both or neither of scores and flag, bad reason, note or comment too long · `401` · `403` · `404` · `409` already reviewed, claim released or expired, scholarship has no rubric · `415`
+`400` missing, extra or out of range score, both or neither of scores and flag, bad reason, note or comment too long, `401`, `403`, `404`, `409` already reviewed, claim released or expired, scholarship has no rubric, `415`
 
 ### DELETE /api/reviews/{applicationId}  [reviewer for their own claim, admin for any]  (release)
 `204` (back to `submitted`, `reviewerId` and `claimedAt` removed), `400`, `401`, `403`, `404`, `409` not `under_review`
