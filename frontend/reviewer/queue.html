@@ -1,2 +1,37 @@
-<!-- reviewer/queue.html — Owner: Mohamed Hazem. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- reviewer/queue.html - Owner: Mohamed Hazem. Applications waiting for a reviewer; claim one to start reviewing. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Review queue | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="reviewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform - Reviewer</strong>
+    <nav id="nav" aria-label="Main">
+      <a href="queue.html">Queue</a>
+      <a href="my-reviews.html">My reviews</a>
+      <button type="button" id="logout" class="link">Log out</button>
+    </nav>
+  </header>
+  <main>
+    <h1>Review queue</h1>
+    <p class="hint">Applications waiting for a reviewer, oldest first. You can hold up to 5 at a time; a claim expires after 48 hours.</p>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p id="empty" hidden>The queue is empty. Nothing to review right now.</p>
+    <table id="queue" hidden>
+      <thead><tr><th>Scholarship</th><th>Submitted</th><th>Application</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="reviewer-common.js"></script>
+  <script src="queue.js"></script>
+</body>
+</html>

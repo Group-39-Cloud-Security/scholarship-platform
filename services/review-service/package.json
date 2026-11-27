@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node --watch src/server.js",
+    "test": "node --test \"tests/*.test.js\"",
     "sync-shared": "bash scripts/sync-shared.sh",
     "zip": "node scripts/zip-lambda.js",
     "deploy": "bash infra/deploy.sh"

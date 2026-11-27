@@ -1,6 +1,115 @@
-# REST Client tests for review-service. Copy rows into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
+# REST Client tests for review-service. Copy results into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
+# Phase A tokens (shared/auth.js test users): test-reviewer, test-admin, test-student-1. No real secrets in this file.
+# Set baseUrl from: source ../../platform/vars.sh && echo $API_URL
+# Replace APP_ID with an applicationId from the queue (T-REV-03).
 @baseUrl = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
-@token = PASTE_TOKEN_FROM_get-token.sh
+@reviewer = test-reviewer
+@appId = APP_ID
 
-### T-REV-01 health / first normal case
-# TODO: one normal, one invalid (400), one unauthenticated (401), one wrong role (403), one other-user record (404) per function
+### T-REV-01 queue without a token -> 401
+GET {{baseUrl}}/api/reviews/queue
+
+### T-REV-02 queue as a student -> 403
+GET {{baseUrl}}/api/reviews/queue
+Authorization: Bearer test-student-1
+
+### T-REV-03 queue as a reviewer -> 200
+GET {{baseUrl}}/api/reviews/queue
+Authorization: Bearer {{reviewer}}
+
+### T-REV-04 claim with the wrong Content-Type -> 415
+POST {{baseUrl}}/api/reviews
+Authorization: Bearer {{reviewer}}
+Content-Type: text/plain
+
+applicationId={{appId}}
+
+### T-REV-05 claim with an invalid id -> 400
+POST {{baseUrl}}/api/reviews
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "applicationId": "../x" }
+
+### T-REV-06 claim an unknown id -> 404
+POST {{baseUrl}}/api/reviews
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "applicationId": "00000000-0000-4000-8000-000000000000" }
+
+### T-REV-07 claim -> 201 (reviewerId in the body is ignored)
+POST {{baseUrl}}/api/reviews
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "applicationId": "{{appId}}", "reviewerId": "someone-else" }
+
+### T-REV-07b claim the same one again -> 409
+POST {{baseUrl}}/api/reviews
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "applicationId": "{{appId}}" }
+
+### my claims and reviews -> 200
+GET {{baseUrl}}/api/reviews/mine
+Authorization: Bearer {{reviewer}}
+
+### open the claimed application + rubric -> 200
+GET {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+
+### T-REV-19 PDF link (5 minutes) -> 200
+GET {{baseUrl}}/api/reviews/{{appId}}/pdf
+Authorization: Bearer {{reviewer}}
+
+### T-REV-11 score out of range -> 400 (use the rubric's criterionIds)
+PUT {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "scores": { "academic": 11, "essay": 7, "need": 5 } }
+
+### T-REV-12 score -> 200, server total (totalScore in the body is ignored)
+PUT {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "scores": { "academic": 8, "essay": 7, "need": 5 }, "totalScore": 100, "comment": "Strong essay" }
+
+### T-REV-13 score again -> 409 (final)
+PUT {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "scores": { "academic": 10, "essay": 10, "need": 10 } }
+
+### T-REV-15 flag (on a different claimed application) -> 200
+PUT {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+Content-Type: application/json
+
+{ "flagged": true, "flagReason": "ineligible", "flagNote": "GPA in the PDF is 2.1" }
+
+### T-REV-16 release my claim -> 204
+DELETE {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer {{reviewer}}
+
+### T-REV-17 admin releases any claim -> 204
+DELETE {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer test-admin
+
+### T-REV-18 student tries to release -> 403
+DELETE {{baseUrl}}/api/reviews/{{appId}}
+Authorization: Bearer test-student-1
+
+### T-REV-22 foreign origin -> no Access-Control-Allow-Origin in the response
+GET {{baseUrl}}/api/reviews/queue
+Authorization: Bearer {{reviewer}}
+Origin: http://evil.example
+
+### T-REV-20 (CLI, not HTTP) expiry job
+# Put an under_review application with claimedAt older than 48 hours in Applications (test data), then:
+# aws lambda invoke --function-name release-expired-claims out.json && cat out.json
+# Expected: {"checked":1,"released":1}, the application is back to submitted, claim_expired in AuditLog.
