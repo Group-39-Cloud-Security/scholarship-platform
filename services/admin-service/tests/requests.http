@@ -555,3 +555,7 @@ Authorization: Bearer test-admin
 ### T-ADM-80 through SQS into the DLQ after maxReceiveCount failures (about 4.5 minutes) — only in tests/api-tests.sh
 
 ### T-ADM-81 sender settings restored and test rows deleted — only in tests/api-tests.sh
+
+### T-ADM-82 a message for an email still "sending": skipped on attempt 1, marked failed on a retry — only in tests/api-tests.sh
+
+### T-ADM-83 the same through real SQS (a dead attempt, then the retry) — only in tests/api-tests.sh

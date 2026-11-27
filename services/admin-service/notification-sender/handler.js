@@ -3,7 +3,8 @@
 //
 // Message (from admin-service): { applicationId, studentEmail, scholarshipTitle, decision, flagReason? }
 // emailStatus on the application: pending → queued (admin-service) → sending (this handler claims it)
-//   → sent, or back to queued to be retried, or failed on the queue's last attempt (then SQS moves it to the DLQ).
+//   → sent, or back to queued to be retried, or failed on the queue's last attempt (then SQS moves it to the DLQ),
+//   or failed when a retry finds it still "sending" (the attempt that claimed it died; never sent twice).
 // The Brevo key is read from SSM and never logged. The email is plain text only.
 
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
@@ -138,15 +139,24 @@ async function handleRecord(record) {
 
   // Claim the email before sending: only one copy of a duplicated message can move it to "sending",
   // and an email already sent is never sent again.
+  const attempt = Number(record.attributes && record.attributes.ApproximateReceiveCount);
   if (!(await moveEmailStatus(m.applicationId, ['pending', 'queued'], 'sending'))) {
-    log('info', 'email not sent: already sent, being sent, or no such application', { applicationId: m.applicationId });
+    // A RETRY that still finds "sending": the attempt that claimed it died before finishing (the Lambda timeout is
+    // 15 s, a retry only comes after the 90 s visibility timeout). Whether it sent is unknown, so don't send again:
+    // mark it failed for the admin and return normally, so SQS deletes the message.
+    // A FIRST delivery (attempt 1) that finds "sending" is a duplicate copy while another copy is still sending: skip.
+    if (Number.isInteger(attempt) && attempt > 1 && await moveEmailStatus(m.applicationId, ['sending'], 'failed')) {
+      await writeAudit({ action: 'email_failed', userId: 'notification-sender', targetId: m.applicationId, detail: `previous attempt did not finish (seen on attempt ${attempt})` });
+      log('error', 'previous attempt did not finish, emailStatus set to failed', { applicationId: m.applicationId, attempt, action: 'email_failed' });
+      return;
+    }
+    log('info', 'email not sent: already sent, being sent, or no such application', { applicationId: m.applicationId, attempt });
     return; // nothing to do; SQS deletes this copy
   }
 
   try {
     await sendWithBrevo(m);
   } catch (err) {
-    const attempt = Number(record.attributes && record.attributes.ApproximateReceiveCount);
     const max = await getMaxReceiveCount();
     const last = max !== null && Number.isInteger(attempt) && attempt >= max;
     await moveEmailStatus(m.applicationId, ['sending'], last ? 'failed' : 'queued');

@@ -120,7 +120,8 @@ if [ -n "$(env_value BREVO_API_KEY)" ]; then
   rm -f "$KEY_FILE"
   echo "SSM /scholarship/brevo-api-key set from the local .env (value not shown)"
 else
-  echo "WARNING: BREVO_API_KEY is empty in services/admin-service/.env, so /scholarship/brevo-api-key is not set and decision emails will fail."
+  echo "WARNING: BREVO_API_KEY is empty in services/admin-service/.env, so /scholarship/brevo-api-key was NOT updated."
+  echo "         An older key may still be in SSM and will keep being used; if there is none, decision emails will fail."
 fi
 BREVO_SENDER_EMAIL="$(env_value BREVO_SENDER_EMAIL)"
 [ -n "$BREVO_SENDER_EMAIL" ] || echo "WARNING: BREVO_SENDER_EMAIL is empty in services/admin-service/.env (Brevo needs a verified sender)."

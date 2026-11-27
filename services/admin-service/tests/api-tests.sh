@@ -8,6 +8,12 @@
 #   bash services/admin-service/tests/api-tests.sh | tee evidence/admin-api-tests-floci.txt
 # Needs curl and node; the table and AuditLog checks (T-ADM-09, T-ADM-18) also need the AWS CLI with the floci profile.
 # Creates a few draft scholarships each run (harmless test data; platform/reset.sh clears them).
+#
+# LOCAL FLOCI ONLY. Never point this at a shared or real environment: to check what it asserts, it
+#   - reads and DELETES every message waiting in the notifications queue (and its own messages in notifications-dlq),
+#   - turns notification-sender's SQS trigger off and on, and briefly changes that Lambda's settings,
+#   - writes and deletes rows straight in Applications, Reviews and Users, and sets some users' status by hand.
+# Anything another person or service had queued at that moment would be lost.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
@@ -909,6 +915,8 @@ if [ $HAVE_AWS = yes ]; then
   AWSF() { AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws "$@"; }
   MAXRC=$(AWSF sqs get-queue-attributes --queue-url "$QURL" --attribute-names RedrivePolicy --query Attributes.RedrivePolicy --output text \
     | tr -d '\r' | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(String(JSON.parse(d).maxReceiveCount)))')
+  DLQURL=$(AWSF sqs get-queue-url --queue-name notifications-dlq --query QueueUrl --output text | tr -d '\r')
+  dlq_count() { AWSF sqs get-queue-attributes --queue-url "$DLQURL" --attribute-names ApproximateNumberOfMessages --query Attributes.ApproximateNumberOfMessages --output text | tr -d '\r'; }
   SENDER_ENV_FILE="$(winpath "$TMP/sender-env.json")"
   AWSF lambda get-function-configuration --function-name notification-sender --query Environment --output json > "$SENDER_ENV_FILE"
   restore_sender_env() {
@@ -989,8 +997,6 @@ if [ $HAVE_AWS = yes ]; then
   # T-ADM-80: the real path, through SQS: decision → queue → sender fails each time → after maxReceiveCount the
   # message is in the DLQ and emailStatus is failed. Takes about maxReceiveCount × 90 s, so only on the API Gateway run.
   if [ $GATEWAY = yes ]; then
-    DLQURL=$(AWSF sqs get-queue-url --queue-name notifications-dlq --query QueueUrl --output text | tr -d '\r')
-    dlq_count() { AWSF sqs get-queue-attributes --queue-url "$DLQURL" --attribute-names ApproximateNumberOfMessages --query Attributes.ApproximateNumberOfMessages --output text | tr -d '\r'; }
     DLQ_BEFORE=$(dlq_count)
     DS=$(published_scholarship 2); DA=$(uuid); seed_app "$DA" "$DS" reviewed false
     call PATCH $DEC/$DA/decision test-admin "$ACC"
@@ -1039,6 +1045,42 @@ if [ $HAVE_AWS = yes ]; then
     skip T-ADM-77 "real send through the Brevo sandbox" "no Brevo key in SSM or no BREVO_SENDER_EMAIL (or sandbox off): set them in services/admin-service/.env and run deploy.sh"
     skip T-ADM-78 "two copies of one message, one email" "same as T-ADM-77"
   fi
+
+  # T-ADM-82: "sending" found again. On a first delivery it's a duplicate copy while another is sending: skip.
+  # On a retry the attempt that claimed it died (15 s Lambda timeout, retry after 90 s): mark failed, return normally.
+  E=$(uuid); seed_email_app "$E" sending; BEFORE_F=$(count_action email_failed)
+  sqs_event "$TMP/s1.json" "$(email_msg "$E")" 1; invoke_sender "$TMP/s1.json" "$TMP/s1-out.json"
+  STATUS="$STATUS, emailStatus $(app_field "$E" emailStatus), email_failed $BEFORE_F -> $(count_action email_failed)"
+  [ "${STATUS%%,*}" = ok ] && [ "$(app_field "$E" emailStatus)" = sending ] && [ "$(count_action email_failed)" = "$BEFORE_F" ] && ok=ok || ok=no
+  result T-ADM-82 "attempt 1 finds 'sending' (a copy still in progress): skipped, nothing changed" $ok
+  sqs_event "$TMP/s2.json" "$(email_msg "$E")" 2; invoke_sender "$TMP/s2.json" "$TMP/s2-out.json"
+  STATUS="$STATUS, emailStatus $(app_field "$E" emailStatus), email_failed $BEFORE_F -> $(count_action email_failed)"
+  [ "${STATUS%%,*}" = ok ] && [ "$(app_field "$E" emailStatus)" = failed ] && [ "$(count_action email_failed)" -eq $((BEFORE_F + 1)) ] && ok=ok || ok=no
+  result T-ADM-82 "attempt 2 finds 'sending' (the earlier attempt died): returns normally, emailStatus failed, one email_failed" $ok
+
+  # T-ADM-83: the same through real SQS. The test plays the attempt that died: it receives the message once (attempt 1)
+  # and claims the email (queued → sending) the way the sender does, then lets the message come back at once instead of
+  # after 90 s. SQS then delivers it to the sender as attempt 2.
+  E=$(uuid); seed_email_app "$E" queued
+  set_trigger disabled; take_messages
+  AWSF sqs send-message --queue-url "$QURL" --message-body "$(email_msg "$E")" >/dev/null
+  AWSF sqs receive-message --queue-url "$QURL" --max-number-of-messages 1 --wait-time-seconds 2 --output json | tr -d '\r' > "$TMP/died.json"
+  DIED_HANDLE=$(node -e 'const m=(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")||"{}").Messages||[])[0];process.stdout.write(m?m.ReceiptHandle:"")' "$(winpath "$TMP/died.json")")
+  AWSF dynamodb update-item --table-name Applications --key "{\"applicationId\":{\"S\":\"$E\"}}" --update-expression 'SET emailStatus = :s' \
+    --condition-expression 'emailStatus = :q' --expression-attribute-values '{":s":{"S":"sending"},":q":{"S":"queued"}}'
+  [ -n "$DIED_HANDLE" ] && AWSF sqs change-message-visibility --queue-url "$QURL" --receipt-handle "$DIED_HANDLE" --visibility-timeout 0
+  DLQ_BEFORE=$(dlq_count); BEFORE_F=$(count_action email_failed)
+  set_trigger enabled
+  for _ in $(seq 1 20); do [ "$(app_field "$E" emailStatus)" = failed ] && break; node -e "setTimeout(()=>{},3000)"; done
+  node -e "setTimeout(()=>{},3000)" # let SQS finish deleting the message
+  INQ=$(AWSF sqs get-queue-attributes --queue-url "$QURL" --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible \
+    --query 'Attributes.[ApproximateNumberOfMessages,ApproximateNumberOfMessagesNotVisible]' --output text | tr -d '\r' | tr '\t' '/')
+  DIED_LOG=$(AWSF logs filter-log-events --log-group-name /aws/lambda/notification-sender --start-time "$STARTED_MS" --query 'events[].message' --output text \
+    | tr '\t' '\n' | grep "$E" | grep -o '"message":"previous attempt did not finish[^"]*","applicationId":"[^"]*","attempt":[0-9]*' | sed 's/"applicationId":"[^"]*",//')
+  STATUS="emailStatus $(app_field "$E" emailStatus), email_failed $BEFORE_F -> $(count_action email_failed), queue visible/in flight $INQ, DLQ $DLQ_BEFORE -> $(dlq_count), log: $DIED_LOG"
+  [ -n "$DIED_HANDLE" ] && [ "$(app_field "$E" emailStatus)" = failed ] && [ "$(count_action email_failed)" -eq $((BEFORE_F + 1)) ] \
+    && [ "$INQ" = 0/0 ] && [ "$(dlq_count)" = "$DLQ_BEFORE" ] && echo "$DIED_LOG" | grep -q '"attempt":2' && ok=ok || ok=no
+  result T-ADM-83 "through SQS: a retry after a dead attempt marks failed, the message is deleted, nothing in the DLQ, no second send" $ok
 
   # T-ADM-79: no Brevo key or key header in the sender's log, no email address in the email audit rows
   AWSF logs filter-log-events --log-group-name /aws/lambda/notification-sender --start-time "$STARTED_MS" \
