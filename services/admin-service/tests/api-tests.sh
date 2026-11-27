@@ -766,6 +766,122 @@ else
   skip T-ADM-50 "user tests (50-62)" "need the AWS CLI to seed users"
 fi
 
+# ---------- GET /api/admin/audit-log and GET /api/admin/stats (step 7) ----------
+AL=/api/admin/audit-log
+ST=/api/admin/stats
+b64url() { node -e 'process.stdout.write(Buffer.from(process.argv[1]).toString("base64url"))' "$1"; }
+json() { node -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.stdout.write(String((${1})(d)))" "$BODY"; }
+
+call GET "$AL?action=decision" ""
+expect T-ADM-63 "audit log, no token" 401 UNAUTHENTICATED
+call GET "$AL?action=decision" test-student-1
+expect T-ADM-63 "audit log, student token" 403 FORBIDDEN
+call GET $ST ""
+expect T-ADM-63 "stats, no token" 401 UNAUTHENTICATED
+call GET $ST test-reviewer
+expect T-ADM-63 "stats, reviewer token" 403 FORBIDDEN
+
+call GET $AL test-admin
+expect T-ADM-64 "no action" 400 "action is required"
+call GET "$AL?action=bogus" test-admin
+expect T-ADM-64 "unknown action" 400 "action must be one of"
+call GET "$AL?action=decision&since=yesterday" test-admin
+expect T-ADM-64 "since=yesterday" 400 "since must be a real ISO 8601"
+call GET "$AL?action=decision&since=2027-02-30T10:00:00Z" test-admin
+expect T-ADM-64 "since on 30 February" 400 "since must be a real ISO 8601"
+for bad in 0 101 abc -1; do
+  call GET "$AL?action=decision&limit=$bad" test-admin
+  expect T-ADM-64 "limit=$bad" 400 "limit must be a whole number from 1 to 100"
+done
+call GET "$AL?action=decision&next=not-a-token" test-admin
+expect T-ADM-64 "next that is not a token" 400 "not a valid paging token"
+call GET "$AL?action=scholarship_created&next=$(b64url '{"action":"decision","sortKey":"2026"}')" test-admin
+expect T-ADM-64 "next made for another action" 400 "not a valid paging token"
+call GET "$AL?action=decision&next=$(b64url '{"action":"decision","sortKey":"2026","extra":"x"}')" test-admin
+expect T-ADM-64 "next with an extra key" 400 "not a valid paging token"
+
+STEP7_START=$(node -e 'process.stdout.write(new Date(Date.now() - 1000).toISOString())')
+A1=$(new_draft); A2=$(new_draft); A3=$(new_draft)
+call GET "$AL?action=scholarship_created&since=$STEP7_START" test-admin
+expect T-ADM-65 "created scholarships since this run's start" 200 '"items"'
+node -e '
+const { items, next } = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const ids = process.argv.slice(2);
+const keysOk = items.every((r) => Object.keys(r).sort().join(",") === "action,createdAt,detail,targetId,userId");
+const newestFirst = items.every((r, i) => i === 0 || items[i - 1].createdAt >= r.createdAt);
+const want = [ids[2], ids[1], ids[0]].join(",");
+process.exit(items.length === 3 && next === null && keysOk && newestFirst && items.map((r) => r.targetId).join(",") === want
+  && items.every((r) => r.action === "scholarship_created" && r.userId === "test-admin") ? 0 : 1);' "$BODY" "$A1" "$A2" "$A3" && ok=ok || ok=no
+STATUS="items $(json 'd=>d.items.length'), next $(json 'd=>d.next')"
+result T-ADM-65 "exactly the 3 new rows, newest first, only the 5 fields, next null" $ok
+call GET "$AL?action=scholarship_created&since=2099-01-01T00:00:00Z" test-admin
+expect T-ADM-65 "since in the future" 200 '{"items":[],"next":null}'
+
+call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2" test-admin
+expect T-ADM-66 "first page, limit 2" 200 '"items"'
+P1_IDS=$(json 'd=>d.items.map(r=>r.targetId).join(",")'); P1_COUNT=$(json 'd=>d.items.length'); NEXT=$(json 'd=>d.next||""')
+call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2&next=$NEXT" test-admin
+expect T-ADM-66 "second page with next" 200 '"items"'
+P2_IDS=$(json 'd=>d.items.map(r=>r.targetId).join(",")'); P2_NEXT=$(json 'd=>d.next')
+STATUS="page 1: $P1_COUNT items, page 2: [$P2_IDS], page 2 next $P2_NEXT"
+[ "$P1_COUNT" = 2 ] && [ -n "$NEXT" ] && [ "$P2_IDS" = "$A1" ] && [ "$P2_NEXT" = null ] \
+  && [ "$P1_IDS" = "$A3,$A2" ] && ok=ok || ok=no
+result T-ADM-66 "2 + 1 rows over two pages, no overlap, no next after the last page" $ok
+
+call GET "$AL?action=scholarship_created&limit=100" test-admin
+expect T-ADM-67 "limit 100 (the cap)" 200 '"items"'
+STATUS="items $(json 'd=>d.items.length')"
+[ "$(json 'd=>d.items.length')" -le 100 ] && ok=ok || ok=no
+result T-ADM-67 "never more than 100 rows in one call" $ok
+
+if [ $HAVE_AWS = yes ]; then
+  # Secrets: create a reviewer (temp password + hash), then read the audit output for this run.
+  call POST $U test-admin "{\"email\":\"audit-$RUN_TAG@example.org\",\"name\":\"Audit Check\"}"
+  AU_ID=$(json 'd=>d.userId||""'); AU_PW=$(json 'd=>d.temporaryPassword||""'); AU_HASH=$(user_field "$AU_ID" passwordHash)
+  OUT="$TMP/audit-out.txt"; : > "$OUT"
+  for act in user_created forbidden scholarship_created; do
+    call GET "$AL?action=$act&since=$STEP7_START" test-admin
+    cat "$BODY" >> "$OUT"
+  done
+  STATUS="user_created rows for the new user $(grep -o "\"targetId\":\"$AU_ID\"" "$OUT" | wc -l | tr -d ' '); temp password $(grep -cF -- "$AU_PW" "$OUT"); hash $(grep -cF -- "$AU_HASH" "$OUT"); passwordHash/Bearer/authorization $(grep -ciE 'passwordHash|bearer|authorization' "$OUT")"
+  [ -n "$AU_PW" ] && [ -n "$AU_HASH" ] && grep -q "\"targetId\":\"$AU_ID\"" "$OUT" && ! grep -qF -- "$AU_PW" "$OUT" \
+    && ! grep -qF -- "$AU_HASH" "$OUT" && ! grep -qiE 'passwordHash|bearer|authorization' "$OUT" && ok=ok || ok=no
+  result T-ADM-68 "audit output has the new user's row but no temp password, hash or token" $ok
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Users --key "{\"userId\":{\"S\":\"$AU_ID\"}}"
+else skip T-ADM-68 "no secrets in the audit output" "need the AWS CLI to read the stored hash"; fi
+
+call GET $ST test-admin
+expect T-ADM-69 "stats" 200 '"scholarships"'
+node -e '
+const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const ok = (o, keys) => o && Object.keys(o).sort().join(",") === keys && Object.values(o).every((n) => Number.isInteger(n) && n >= 0);
+process.exit(Object.keys(s).sort().join(",") === "applications,scholarships"
+  && ok(s.scholarships, "closed,draft,published") && ok(s.applications, "accepted,rejected,reviewed,submitted,under_review") ? 0 : 1);' "$BODY" && ok=ok || ok=no
+result T-ADM-69 "exactly scholarships{draft,published,closed} and applications{5 statuses}, whole numbers" $ok
+
+if [ $HAVE_AWS = yes ]; then
+  # Known data in, exact change out: 2 drafts (1 then published) and 3 applications.
+  STATS_BEFORE="$(winpath "$TMP/stats-before")"; cp "$BODY" "$STATS_BEFORE"
+  SD=$(new_draft); SP=$(published_scholarship 2)
+  ST_APPS=(); for st in submitted reviewed accepted; do a=$(uuid); seed_app "$a" "$SP" "$st" false; ST_APPS+=("$a"); done
+  call GET $ST test-admin
+  STATUS="$(node -e '
+const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), a = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+const d = (g) => Object.fromEntries(Object.keys(a[g]).map((k) => [k, a[g][k] - b[g][k]]));
+process.stdout.write(JSON.stringify({ scholarships: d("scholarships"), applications: d("applications") }));' "$STATS_BEFORE" "$BODY")"
+  [ "$STATUS" = '{"scholarships":{"draft":1,"published":1,"closed":0},"applications":{"submitted":1,"under_review":0,"reviewed":1,"accepted":1,"rejected":0}}' ] && ok=ok || ok=no
+  result T-ADM-70 "after 1 draft, 1 published, 3 applications: counts change by exactly that" $ok
+  for a in "${ST_APPS[@]}"; do
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Applications --key "{\"applicationId\":{\"S\":\"$a\"}}"
+  done
+  LEFT=0; for a in "${ST_APPS[@]}"; do [ "$(app_field "$a" status)" = None ] || LEFT=$((LEFT+1)); done
+  STATUS="${#ST_APPS[@]} applications seeded, $LEFT left"
+  [ "$LEFT" = 0 ] && ok=ok || ok=no
+  result T-ADM-71 "stats test applications deleted again" $ok
+else
+  skip T-ADM-70 "stats change by exactly the seeded data" "need the AWS CLI to seed applications"
+fi
+
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" = 0 ]

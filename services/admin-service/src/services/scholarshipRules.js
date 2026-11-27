@@ -11,14 +11,13 @@ const CRITERION_ID = /^[a-z][a-z0-9_-]{1,29}$/; // short slug like "academic": s
 // Date AND time AND zone are required: a bare "2027-01-15" would silently mean midnight UTC.
 const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|([+-])(\d{2}):(\d{2}))$/;
 
-// Deadline as a full ISO 8601 date-time with a zone (Z or ±hh:mm). Every part is range-checked by hand because
-// Date.parse rolls impossible dates over (2027-02-30 would become 2 March) instead of rejecting them.
+// A full ISO 8601 date-time with a zone (Z or ±hh:mm), returned as UTC toISOString(). Every part is range-checked
+// by hand because Date.parse rolls impossible dates over (2027-02-30 would become 2 March) instead of rejecting them.
 // Zone offsets go up to ±14:00 (the real-world maximum). -00:00 is rejected on purpose: RFC 3339 uses it for
-// "local offset unknown", and a deadline must be one known instant for every student. Use Z for UTC.
-// May be in the past on a draft: §6 only requires a future deadline at publish.
-// Stored in one format (UTC, toISOString) so the status-deadline-index sorts correctly.
-function checkDeadline(value) {
-  const bad = () => validationError('Deadline must be a real ISO 8601 date and time with a zone, for example 2027-01-15T23:59:00Z.');
+// "local offset unknown", and a time we store or compare must be one known instant. Use Z for UTC.
+// Used for scholarship deadlines and for the audit log's ?since= filter.
+function checkIsoDateTime(value, label) {
+  const bad = () => validationError(`${label} must be a real ISO 8601 date and time with a zone, for example 2027-01-15T23:59:00Z.`);
   const m = typeof value === 'string' ? ISO_DATE_TIME.exec(value) : null;
   if (!m) throw bad();
   const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6] || '0'].map(Number);
@@ -31,6 +30,10 @@ function checkDeadline(value) {
   }
   return new Date(value).toISOString();
 }
+
+// Deadline: may be in the past on a draft (§6 only requires a future deadline at publish).
+// Stored in one format (UTC) so the status-deadline-index sorts correctly.
+const checkDeadline = (value) => checkIsoDateTime(value, 'Deadline');
 
 // 2–6 criteria, unique slug ids, whole-number weights that add up to exactly 100 (§6).
 // The weights must sum to 100 because review-service calculates totalScore = Σ(score × weight) / 10 → 0–100.
@@ -95,4 +98,4 @@ function validateScholarship(body, platformDomains) {
   };
 }
 
-module.exports = { validateScholarship, checkRubric };
+module.exports = { validateScholarship, checkRubric, checkIsoDateTime };

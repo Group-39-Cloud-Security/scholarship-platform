@@ -501,3 +501,34 @@ Content-Type: application/json
 ### T-ADM-61 two admins disabling each other at once: parallel requests with the test-only second admin, only in tests/api-tests.sh
 
 ### T-ADM-62 the test users are deleted again: only in tests/api-tests.sh
+
+# ---------- GET /api/admin/audit-log and GET /api/admin/stats ----------
+
+### T-ADM-63 no token: 401 (student or reviewer token: 403), same for /api/admin/stats
+GET {{baseUrl}}/api/admin/audit-log?action=decision
+
+### T-ADM-64 unknown action: 400 (no action, bad since, limit outside 1-100, bad next: 400 too)
+GET {{baseUrl}}/api/admin/audit-log?action=bogus
+Authorization: Bearer test-admin
+
+### T-ADM-65 one action since a time, newest first, only 5 fields per row
+GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&since=2026-11-27T00:00:00Z
+Authorization: Bearer test-admin
+
+### T-ADM-66 paging: limit 2, then send the returned next value as &next=...
+GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&limit=2
+Authorization: Bearer test-admin
+
+### T-ADM-67 the cap: limit=100 is the most one call returns
+GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&limit=100
+Authorization: Bearer test-admin
+
+### T-ADM-68 no temp password, hash or token in the audit output: needs a created reviewer and the stored hash, only in tests/api-tests.sh
+
+### T-ADM-69 stats: scholarships and applications counted by status
+GET {{baseUrl}}/api/admin/stats
+Authorization: Bearer test-admin
+
+### T-ADM-70 stats change by exactly the data added: needs seeded applications, only in tests/api-tests.sh
+
+### T-ADM-71 the seeded applications are deleted again: only in tests/api-tests.sh

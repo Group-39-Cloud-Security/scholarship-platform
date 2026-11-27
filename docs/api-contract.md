@@ -342,3 +342,32 @@ Rules (§6 Accounts):
 - Phase A: the acting admin needs a row in `Users` for the admin rule (the tests seed `test-admin`); in Phase B `authenticate` re-reads `Users`, so every caller has one and a disabled user is blocked on the next request (§2).
 
 `400` id invalid or status not `active`/`disabled`, `401`, `403`, `404 USER_NOT_FOUND`, `409`, `415`
+
+### GET /api/admin/audit-log?action=&since=&limit=&next=  [admin]
+- `action` (required): one of `login`, `login_failed`, `forbidden`, `claim`, `claim_expired`, `release`, `review`, `pdf_download`, `scholarship_created`, `scholarship_updated`, `scholarship_published`, `scholarship_closed`, `decision`, `user_created`, `user_disabled`, `user_enabled`. It is the table's partition key, so every call is one Query, never a Scan. **A service that writes a new action must add it to this list** (`src/controllers/audit.js`).
+- `since` (optional): a full ISO 8601 date-time with a zone, same rules as a deadline. Rows with `createdAt` >= since.
+- `limit` (optional): 1-100, default 50. 100 is a hard cap per call.
+- `next` (optional): the `next` value from the previous page. Only accepted for the same `action`.
+
+`200`, newest first. Each row has exactly these 5 fields, returned as plain data:
+```json
+{
+  "items": [
+    { "action": "decision", "createdAt": "2026-11-27T14:20:07.064Z", "userId": "test-admin", "targetId": "4123d54c-19de-4551-8f8b-5f88bf29438e", "detail": "accepted" }
+  ],
+  "next": "eyJhY3Rpb24iOiJkZWNpc2lvbiIsInNvcnRLZXkiOiIyMDI2LTExLTI3VDE0OjIwOjA3LjA2NFojLi4uIn0"
+}
+```
+`next` is `null` on the last page. Audit rows never hold passwords, hashes or tokens (writers only put short descriptions in `detail`).
+`400` no or unknown `action`, bad `since`, `limit` outside 1-100, a `next` that is not a token for this action, `401`, `403`
+
+### GET /api/admin/stats  [admin]
+Counted live by DynamoDB on the status indexes (`status-deadline-index` on Scholarships, `status-index` on Applications, `Select: COUNT`, every page). Nothing stored or hard-coded.
+`200`
+```json
+{
+  "scholarships": { "draft": 3, "published": 2, "closed": 1 },
+  "applications": { "submitted": 5, "under_review": 2, "reviewed": 1, "accepted": 1, "rejected": 0 }
+}
+```
+`401`, `403`

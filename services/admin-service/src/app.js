@@ -11,6 +11,7 @@ const healthRoutes = require('./routes/health');
 const scholarshipRoutes = require('./routes/scholarships');
 const applicationRoutes = require('./routes/applications');
 const userRoutes = require('./routes/users');
+const auditRoutes = require('./routes/audit');
 
 const app = express();
 app.disable('x-powered-by'); // don't advertise Express
@@ -34,6 +35,7 @@ app.use('/api/health', healthRoutes); // the only route without a token
 app.use('/api/admin/scholarships', scholarshipRoutes); // admin only (authenticate + requireRole in the router)
 app.use('/api/admin/applications', applicationRoutes); // admin only (authenticate + requireRole in the router)
 app.use('/api/admin/users', userRoutes); // admin only (authenticate + requireRole in the router)
+app.use('/api/admin', auditRoutes); // /audit-log and /stats, admin only (guard on each route)
 
 app.use(routeNotFound);
 app.use(errorHandler);
