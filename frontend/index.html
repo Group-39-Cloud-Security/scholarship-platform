@@ -1,2 +1,50 @@
-<!-- index.html — login + register page. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only) -->
-<!-- TODO: login form, register form, error message area; scripts: js/config.js, js/api.js, js/auth.js -->
+<!-- index.html — login page. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only, token in sessionStorage) -->
+<!-- TODO Phase B (Khalil's auth slice): add the register form here (POST /api/auth/register: allowed email domain, password ≥ 10, Pwned Passwords). -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API (same policy as the reviewer pages) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Log in | Scholarship Platform</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+  </header>
+  <main class="narrow">
+    <h1>Log in</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <form id="login-form" class="form" novalidate>
+      <label for="email">University email</label>
+      <input id="email" type="email" autocomplete="username" maxlength="254" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" maxlength="200" required>
+      <p><button type="submit">Log in</button></p>
+    </form>
+
+    <!-- TODO remove in Phase B: test users from shared-lib/auth.js, so pages can be tried before login exists. -->
+    <section id="test-login" class="box">
+      <h2>Test users (Phase A only)</h2>
+      <p class="hint">Login isn't built yet. Pick a test user to try the pages. The backend accepts these tokens until Phase B.</p>
+      <label for="test-user">Test user</label>
+      <select id="test-user">
+        <option value="test-student-1">Student 1 (student1@example-university.edu)</option>
+        <option value="test-student-2">Student 2 (student2@example-university.edu)</option>
+        <option value="test-reviewer">Reviewer</option>
+        <option value="test-admin">Admin</option>
+      </select>
+      <p><button type="button" id="test-login-button" class="secondary">Continue as test user</button></p>
+    </section>
+  </main>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>
