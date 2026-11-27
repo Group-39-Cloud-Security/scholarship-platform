@@ -527,7 +527,7 @@ Email (SQS `notifications`, consumed by `notification-sender`):
 `400` id not a UUID, `decision` not `accepted`/`rejected`, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` (not reviewed, already decided, flagged accept, awards limit reached, scholarship missing), `415`
 
 ### Users (account management)
-`Users` belongs to the shared auth-service (§1, §5); admin-service only manages accounts in it. On Floci the table is a local test fixture in admin-service's deploy.sh until auth-service creates it. `passwordHash` is never read back or returned: every read names its fields, and responses only ever contain `userId, email, name, role, status, mustChangePassword, createdAt`.
+`Users` belongs to the shared auth-service (§1, §5); admin-service only manages accounts in it. auth-service's deploy.sh creates the table. `passwordHash` is never read back or returned: every read names its fields, and responses only ever contain `userId, email, name, role, status, mustChangePassword, createdAt`.
 
 ### GET /api/admin/users?role=&status=  [admin]
 Both filters optional: `role` one of `student`, `reviewer`, `admin`; `status` one of `active`, `disabled` (anything else → `400`). Sorted by email.

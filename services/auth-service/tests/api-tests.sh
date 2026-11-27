@@ -283,6 +283,52 @@ else
   skip T-AUT-30 "metric filter pattern on CloudWatch" "the local server logs to its own console; run through the gateway"
 fi
 
+# ---------- shared auth.js with real JWTs (step 4), on an admin-service route ----------
+# Needs admin-service deployed with shared-lib 0.4.0 or later. A Users row's role and status are changed by hand
+# to prove authenticate re-reads Users on every request and never trusts the role inside the token.
+set_user() { # userId field value
+  AWSF dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$1\"}}" --update-expression 'SET #f = :v' \
+    --expression-attribute-names "{\"#f\":\"$2\"}" --expression-attribute-values "{\":v\":{\"S\":\"$3\"}}"
+}
+if [ $GATEWAY = yes ]; then
+  STATS=/api/admin/stats
+  for t in test-admin test-student-1 test-reviewer; do
+    call GET $STATS "$t"
+    expect T-AUT-31 "old Phase A token 'Bearer $t' is refused" 401 UNAUTHENTICATED
+  done
+
+  EMAIL6=$(new_email); PW6=$(rand); register "$EMAIL6" "$PW6" "Promoted Admin"; U6=$(json .userId)
+  login "$EMAIL6" "$PW6"; TOKEN6=$(json .token)
+  call GET $STATS "$TOKEN6"
+  expect T-AUT-32 "real student token on an admin route" 403 FORBIDDEN
+  set_user "$U6" role admin
+  call GET $STATS "$TOKEN6"
+  expect T-AUT-32 "same token after the role is changed to admin in Users (token still says student)" 200 '"scholarships"'
+
+  set_user "$U6" status disabled
+  call GET $STATS "$TOKEN6"
+  expect T-AUT-33 "same token after the account is disabled" 401 UNAUTHENTICATED
+  set_user "$U6" status active
+
+  TAMPERED="${TOKEN6%?}$( [ "${TOKEN6: -1}" = A ] && echo B || echo A )"
+  call GET $STATS "$TAMPERED"
+  expect T-AUT-34 "token with its signature changed" 401 UNAUTHENTICATED
+  FORGED=$(node -e "const h=Buffer.from('{\"alg\":\"none\",\"typ\":\"JWT\"}').toString('base64url');
+    const p=Buffer.from(JSON.stringify({sub:process.argv[1],role:'admin'})).toString('base64url');process.stdout.write(h+'.'+p+'.')" "$U6")
+  call GET $STATS "${FORGED}x"
+  expect T-AUT-34 "unsigned token (alg none) for a real admin id" 401 UNAUTHENTICATED
+
+  # A reviewer with a temporary password (mustChangePassword) may only use GET /me and PUT /password.
+  AWSF dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$U6\"}}" --update-expression 'SET mustChangePassword = :t' \
+    --expression-attribute-values '{":t":{"BOOL":true}}'
+  call GET $STATS "$TOKEN6"
+  expect T-AUT-35 "mustChangePassword: an admin route is refused until the password is changed" 403 "Change your temporary password first."
+  AWSF dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$U6\"}}" --update-expression 'SET mustChangePassword = :f' \
+    --expression-attribute-values '{":f":{"BOOL":false}}'
+else
+  skip T-AUT-31 "shared auth.js on admin routes (31-35)" "admin routes only exist through the gateway"
+fi
+
 # ---------- secrets never in the logs ----------
 if [ $GATEWAY = yes ]; then
   node -e "setTimeout(()=>{},3000)" # let CloudWatch Logs catch up
@@ -294,9 +340,9 @@ if [ $GATEWAY = yes ]; then
   # Must contain this run's register lines (so the search really covers it) and none of the secrets.
   grep -q 'api/auth/register' "$TMP/cw.log" && ! grep -qF -- "$PW1" "$TMP/cw.log" \
     && ! grep -q 'passwordHash\|\$2b\$\|1234567890' "$TMP/cw.log" && ok=ok || ok=no
-  result T-AUT-31 "no password or hash in auth-service's CloudWatch log" $ok
+  result T-AUT-36 "no password or hash in auth-service's CloudWatch log" $ok
 else
-  skip T-AUT-31 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
+  skip T-AUT-36 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
 fi
 
 # ---------- clean up ----------
@@ -305,7 +351,7 @@ LEFT=0; for u in "${CREATED[@]}"; do [ "$(user_field "$u" email)" = None ] || LE
 ATT_LEFT=$(test_attempt_keys | grep -c .)
 STATUS="${#CREATED[@]} accounts created, $LEFT left; test LoginAttempts rows left $ATT_LEFT"; CREATED=()
 [ "$LEFT" = 0 ] && [ "$ATT_LEFT" = 0 ] && ok=ok || ok=no
-result T-AUT-32 "test accounts and their LoginAttempts rows deleted again" $ok
+result T-AUT-37 "test accounts and their LoginAttempts rows deleted again" $ok
 
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
