@@ -1,6 +1,32 @@
 # REST Client tests for admin-service. Copy rows into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
-@baseUrl = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
-@token = PASTE_TOKEN_FROM_get-token.sh
+# Local run (npm run dev) uses @local; after deploy, switch @baseUrl to the Floci API (platform/vars.sh prints API_ID).
+@local = http://localhost:3000
+@floci = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
+@baseUrl = {{local}}
+@site = http://localhost:4566
 
-### T-ADM-01 health / first normal case
-# TODO: one normal, one invalid (400), one unauthenticated (401), one wrong role (403), one other-user record (404) per function
+### T-ADM-01 health: 200 { status: ok, runtime: local | lambda }, security headers, Cache-Control: no-store
+GET {{baseUrl}}/api/health
+
+### T-ADM-02 unknown route: 404 ROUTE_NOT_FOUND (on Floci, API Gateway answers {"message":"Not Found"} instead)
+GET {{baseUrl}}/api/nope
+
+### T-ADM-03 bad JSON: 400 VALIDATION_ERROR "Request body is not valid JSON." (body parsing runs before routing)
+POST {{baseUrl}}/api/admin/scholarships
+Content-Type: application/json
+
+{bad
+
+### T-ADM-04 CORS, our site: response has Access-Control-Allow-Origin: http://localhost:4566
+GET {{baseUrl}}/api/health
+Origin: {{site}}
+
+### T-ADM-05 CORS, other site: no Access-Control-Allow-Origin header (Lab 7 T6)
+GET {{baseUrl}}/api/health
+Origin: http://evil.example
+
+### T-ADM-06 preflight: 204 with Access-Control-Allow-Methods
+OPTIONS {{baseUrl}}/api/health
+Origin: {{site}}
+Access-Control-Request-Method: PATCH
+Access-Control-Request-Headers: authorization,content-type

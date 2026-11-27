@@ -1,7 +1,35 @@
-// app.js — builds the Express app (no listen)
+// app.js — builds the Express app (no listen). server.js runs it locally, lambda.js wraps it for Lambda.
 // Owner: Mohamed Wael   ·   Rules: CLAUDE.md §9 pattern
-// TODO:
-//   - order (CLAUDE.md §9): requestLogger → securityHeaders → cors({ origin: CORS_ORIGINS }) → express.json() → fixBody() → routes → ROUTE_NOT_FOUND fallback → errorHandler
-//     (requestLogger from shared/logger.js; securityHeaders, fixBody from shared/middleware.js; errorHandler from shared/errors.js)
-//   - error handler: bad JSON → 400 VALIDATION_ERROR, everything else → 500 INTERNAL_ERROR (details only in the log)
-//   - module.exports = app
+// Order matters (§9): requestLogger, securityHeaders, cors, express.json, fixBody, routes, 404, errorHandler
+
+const express = require('express');
+const cors = require('cors');
+const { requestLogger } = require('../shared/logger');
+const { securityHeaders, fixBody } = require('../shared/middleware');
+const { routeNotFound, errorHandler } = require('../shared/errors');
+const healthRoutes = require('./routes/health');
+
+const app = express();
+app.disable('x-powered-by'); // don't advertise Express
+
+// Only our own website may call the API from a browser (exact origins, from the env var).
+const origins = (process.env.CORS_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean);
+
+app.use(requestLogger);
+app.use(securityHeaders);
+app.use(cors({ origin: origins }));
+app.use(express.json({ limit: '100kb' }));
+app.use(fixBody({ limit: '100kb' })); // Floci can hand the body over as a Buffer/base64 (Lab 7)
+
+// Admin responses carry emails, essays and scores: never let a browser or proxy keep a copy.
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
+app.use('/api/health', healthRoutes);
+
+app.use(routeNotFound);
+app.use(errorHandler);
+
+module.exports = app;
