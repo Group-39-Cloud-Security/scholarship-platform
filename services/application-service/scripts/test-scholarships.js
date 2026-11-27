@@ -24,7 +24,7 @@ const rubric = [
   { criterionId: 'need', name: 'Financial need', description: 'Need shown in the documents', weight: 20 },
 ];
 const base = { description: 'Test scholarship for Phase A.', awards: 2, acceptedCount: 0, rubric, createdBy: 'test-admin', createdAt: new Date().toISOString() };
-const anyone = { allowedDomains: ['example-university.edu'], minGpa: 0, years: [1, 2, 3, 4, 5, 6, 7] };
+const anyone = { allowedDomains: ['example-university.edu'], minGpa: 0, years: [1, 2, 3, 4, 5, 6] };
 
 const SCHOLARSHIPS = [
   { ...base, scholarshipId: 'test-open', title: 'Open Merit Scholarship', status: 'published', deadline: inDays(30), eligibility: anyone },

@@ -78,3 +78,33 @@ test('student view never contains reviewer, flag or essay', () => {
   const v = toStudentView({ applicationId: '1', status: 'reviewed', reviewerId: 'r', flagged: true, flagReason: 'plagiarism_suspected', essay: 'e', submittedAt: 'a' }, { title: 't', deadline: '2999-01-01T00:00:00Z' });
   for (const k of ['reviewerId', 'flagged', 'flagReason', 'essay', 'studentId', 'pdfKey']) assert.ok(!(k in v), k);
 });
+
+// ---------- year of study: 1 to 6 ----------
+// apply() checks the year before any AWS call, so a wrong year fails here without a network.
+const { apply } = require('../src/controllers/applications');
+const essay200 = Array.from({ length: 200 }, (_, i) => `w${i}`).join(' ');
+function applyWithYear(yearOfStudy, pdfBase64 = 'not-a-pdf') {
+  const req = {
+    is: () => true,
+    user: { userId: 'test-student-1', email: 'student1@example-university.edu', role: 'student' },
+    body: { scholarshipId: 'test-open', essay: essay200, gpa: 3, yearOfStudy, pdfBase64 },
+  };
+  return new Promise((resolve) => { apply(req, {}, resolve); }); // next(err) resolves with the error
+}
+
+test('year of study 0 is rejected with 400', async () => {
+  const err = await applyWithYear(0);
+  assert.strictEqual(err.status, 400);
+  assert.strictEqual(err.message, 'Year of study must be between 1 and 6.');
+});
+test('year of study 7 is rejected with 400', async () => {
+  const err = await applyWithYear(7);
+  assert.strictEqual(err.status, 400);
+  assert.strictEqual(err.message, 'Year of study must be between 1 and 6.');
+});
+test('years 1 and 6 pass the year check (the request stops later, at the PDF)', async () => {
+  for (const year of [1, 6]) {
+    const err = await applyWithYear(year); // invalid PDF on purpose: fails after the year check, before AWS
+    assert.match(err.message, /pdfBase64/, `year ${year}`);
+  }
+});

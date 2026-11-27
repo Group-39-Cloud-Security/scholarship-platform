@@ -21,6 +21,8 @@ const { decodePdf } = require('../services/pdfCheck');
 const { isDeadlinePassed, checkEligibility, checkApplicationLimits } = require('../services/eligibility');
 
 const ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+const YEAR_MIN = 1; // year of study: 1 to 6 (API contract)
+const YEAR_MAX = 6;
 
 // ---------- helpers ----------
 
@@ -82,7 +84,7 @@ async function apply(req, res, next) {
     const { scholarshipId } = body;
     const essay = checkWords(body.essay, 'Essay', 200, 1000, 10000);
     const gpa = checkNumber(body.gpa, 'GPA', 0, 4);
-    const yearOfStudy = checkInt(body.yearOfStudy, 'Year of study', 1, 7);
+    const yearOfStudy = checkInt(body.yearOfStudy, 'Year of study', YEAR_MIN, YEAR_MAX);
     const pdfBytes = decodePdf(body.pdfBase64); // 400 not base64 / not a PDF, 413 over 2 MB
 
     // 2. Business rules (409), in the order a student would understand them.
