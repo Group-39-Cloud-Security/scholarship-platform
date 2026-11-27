@@ -7,12 +7,18 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { validationError, unsupportedMediaType, conflict } = require('../../shared/errors');
+const {
+  validationError, unsupportedMediaType, conflict, unauthenticated, tooManyAttempts,
+} = require('../../shared/errors');
 const { checkText } = require('../../shared/validate');
 const { writeAudit } = require('../../shared/audit');
 const { log } = require('../../shared/logger');
 const userService = require('../services/userService');
 const pwnedService = require('../services/pwnedService');
+const loginAttemptService = require('../services/loginAttemptService');
+const tokenService = require('../services/tokenService');
+
+const LOGIN_FAILED = 'Email or password is incorrect.'; // the same for unknown email, wrong password, disabled user
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/;
 const BCRYPT_COST = 10; // same as admin-service (reviewer temporary passwords), so every hash is the same format
@@ -87,4 +93,69 @@ async function register(req, res, next) {
   }
 }
 
-module.exports = { register };
+// The caller's IP as API Gateway saw it (requestContext.http.sourceIp, passed on by serverless-http), or the
+// socket address on a local run. Never X-Forwarded-For: the client can write anything in that header (§6).
+const sourceIp = (req) => (req.requestContext && req.requestContext.http && req.requestContext.http.sourceIp)
+  || req.socket.remoteAddress || 'unknown';
+
+// Unknown emails still pay for one bcrypt compare, so the reply time doesn't tell whether the email exists.
+let dummyHash = null;
+const getDummyHash = () => (dummyHash ||= bcrypt.hash(crypto.randomBytes(16).toString('hex'), BCRYPT_COST));
+
+const publicUser = (u) => ({
+  userId: u.userId, email: u.email, name: u.name, role: u.role, status: u.status,
+  mustChangePassword: u.mustChangePassword === true,
+});
+
+// POST /api/auth/login  { email, password } → 200 { token, user }
+// 401 for every wrong combination (never says whether the email exists), 429 while this email + IP is blocked.
+async function login(req, res, next) {
+  try {
+    requireJson(req);
+    const body = bodyOf(req);
+    const email = checkEmail(body.email);
+    const password = body.password;
+    if (typeof password !== 'string' || password.length < 1 || password.length > 1000) {
+      throw validationError('Password is required.');
+    }
+    const ip = sourceIp(req);
+
+    // Blocked: answer 429 without checking the password, so guesses during the block are worthless.
+    const attempt = await loginAttemptService.getAttempt(email, ip);
+    const blockedFor = attempt && attempt.blockedUntil ? Date.parse(attempt.blockedUntil) - Date.now() : 0;
+    if (blockedFor > 0) {
+      res.locals.action = 'login_blocked';
+      res.set('Retry-After', String(Math.ceil(blockedFor / 1000)));
+      throw tooManyAttempts('Too many failed logins. Try again later.');
+    }
+
+    const user = await userService.findByEmail(email);
+    const passwordOk = user && typeof user.passwordHash === 'string'
+      ? await bcrypt.compare(password, user.passwordHash)
+      : (await bcrypt.compare(password, await getDummyHash()), false);
+
+    if (!passwordOk || user.status !== 'active') {
+      const failures = await loginAttemptService.recordFailure(email, ip);
+      const blockMinutes = loginAttemptService.blockMs(failures) / 60000;
+      // The request log line gets "action":"login_failed": review-service's metric filter counts exactly that.
+      res.locals.action = 'login_failed';
+      await writeAudit({
+        action: 'login_failed',
+        userId: user ? user.userId : undefined,
+        targetId: email,
+        detail: `failure ${failures} from ${ip}` + (blockMinutes ? `, blocked ${blockMinutes} min` : ''),
+      });
+      throw unauthenticated(LOGIN_FAILED);
+    }
+
+    if (attempt && attempt.failures) await loginAttemptService.reset(email, ip);
+    const token = await tokenService.signToken(user);
+    res.locals.action = 'login';
+    await writeAudit({ action: 'login', userId: user.userId, targetId: user.userId, detail: `from ${ip}` });
+    res.status(200).json({ token, user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login };

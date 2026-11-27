@@ -4,6 +4,65 @@ One section per service, written by its owner: data dictionary (Field · Type ·
 
 ## auth-service
 
+Shared component, built by Mohamed Wael (team decision 28 Nov). Lambda `auth-service`. Register and login need no token; `/me` and password change need `Authorization: Bearer <token>` (any role). Every response carries `Cache-Control: no-store` and the shared security headers. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Passwords and `passwordHash` are never returned, logged or audited.
+
+### Data dictionary: `Users` (one item per account)
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| userId | string (UUID) | Server | `crypto.randomUUID()` |
+| email | string | Client | trimmed, lowercased, valid address, at most 254 characters; register: domain in `ALLOWED_DOMAINS`, not already used (409) |
+| name | string | Client | 2-60 characters after trimming |
+| role | `student` / `reviewer` / `admin` | Server | register always makes `student`; reviewers come from admin-service, the first admin from `seed.sh` |
+| status | `active` / `disabled` | Server | `active` on register; admin-service changes it |
+| passwordHash | string | Server | bcryptjs, cost 10. The password itself: at least 10 characters, at most 72 bytes, not found in Pwned Passwords |
+| mustChangePassword | boolean | Server | `false` on register, `true` for reviewers created by an admin |
+| createdAt | string (ISO 8601 UTC) | Server | time of creation |
+
+### Data dictionary: `LoginAttempts` (one item per email + source IP)
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| emailIp | string | Server | `<email>#<ip>`, the IP from API Gateway's `requestContext.http.sourceIp`, never `X-Forwarded-For` |
+| failures | number | Server | +1 per failed login (atomic `ADD`), 0 after a success |
+| blockedUntil | string (ISO 8601 UTC) | Server | after the 5th failure: now + 1 min, then 2, 4, 8, at most 15 min; removed after a success |
+| expiresAt | number (epoch seconds) | Server | now + 24 h on every failure; DynamoDB TTL deletes the row after it |
+
+### POST /api/auth/register  [anyone, no token]
+```json
+{ "email": "student1@example-university.edu", "name": "Student One", "password": "a long passphrase" }
+```
+`201`, the new account (never the password or its hash):
+```json
+{ "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false, "createdAt": "2026-11-28T10:00:00.000Z" }
+```
+`role`, `status` or `userId` in the body are ignored. Writes a `user_created` audit row (detail `student registered`).
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | bad JSON, invalid email, name not 2-60, password shorter than 10 or longer than 72 bytes, email outside `ALLOWED_DOMAINS`, password found in Pwned Passwords |
+| 409 | `CONFLICT` | an account with this email already exists |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+
+Pwned Passwords: only the first 5 hex characters of the password's SHA-1 are sent (k-anonymity, `Add-Padding`), 5 s timeout. If the API can't be reached the password is allowed and a `pwned_check_unavailable` warn line is logged (fails open, docs/decisions.md).
+
+### POST /api/auth/login  [anyone, no token]
+```json
+{ "email": "student1@example-university.edu", "password": "a long passphrase" }
+```
+`200`:
+```json
+{ "token": "eyJhbGciOiJIUzI1NiIs...", "user": { "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false } }
+```
+The token is a JWT, HS256, valid 1 hour, signed with `/scholarship/jwt-secret` (SSM). It holds only `sub` (userId), `role`, `iat`, `exp`; the backend never trusts the role in it and re-reads the user from `Users` on every request. Writes a `login` audit row.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | bad JSON, invalid email, password missing |
+| 401 | `UNAUTHENTICATED` | "Email or password is incorrect." for an unknown email, a wrong password and a disabled account alike (same body; unknown emails still pay for one bcrypt compare). Counts a failure, writes a `login_failed` audit row (detail: failure count and IP) and a request log line with `"action":"login_failed"` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+| 429 | `TOO_MANY_ATTEMPTS` | this email + IP is blocked (see `LoginAttempts`); the password is not checked, `Retry-After` gives the seconds left. Logged as `"action":"login_blocked"`, no audit row (a flood of blocked guesses can't flood `AuditLog`) |
+
 ## application-service
 
 Owner: Mohamed Khalil. Lambda `application-service`. Every route needs `Authorization: Bearer <token>`; the allowed role is in brackets. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'`.

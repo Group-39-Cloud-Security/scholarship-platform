@@ -32,8 +32,18 @@ echo
 TMP="$(mktemp -d)"
 CREATED=() # userIds this run created; deleted at the end (and by the trap if the run dies)
 cleanup_users() { for u in "${CREATED[@]}"; do AWSF dynamodb delete-item --table-name Users --key "{\"userId\":{\"S\":\"$u\"}}" 2>/dev/null; done; }
+test_attempt_keys() { # every LoginAttempts key for a t-aut- email (this run's, or left by a run that died)
+  AWSF dynamodb scan --table-name LoginAttempts --filter-expression 'begins_with(emailIp, :p)' \
+    --expression-attribute-values '{":p":{"S":"t-aut-"}}' --query 'Items[].emailIp.S' --output text 2>/dev/null \
+    | tr -d '\r' | tr '\t' '\n' | grep -v '^None$' | grep .
+}
+cleanup_attempts() {
+  test_attempt_keys | while read -r k; do
+    AWSF dynamodb delete-item --table-name LoginAttempts --key "{\"emailIp\":{\"S\":\"$k\"}}"
+  done
+}
 EXTRA_PID=""
-trap '[ -n "$EXTRA_PID" ] && kill "$EXTRA_PID" 2>/dev/null; cleanup_users; rm -rf "$TMP"' EXIT
+trap '[ -n "$EXTRA_PID" ] && kill "$EXTRA_PID" 2>/dev/null; cleanup_users; cleanup_attempts; rm -rf "$TMP"' EXIT
 BODY="$(winpath "$TMP/body")"
 HDRS="$(winpath "$TMP/headers")"
 PASS=0; FAIL=0; SKIP=0; STATUS=""
@@ -51,7 +61,7 @@ header() { tr -d '\r' < "$HDRS" | grep -qi "^$1:${2:+ *$2}"; }
 json() { node -e "const b=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));const v=b$1;process.stdout.write(v===undefined?'':String(v))" "$BODY" 2>/dev/null; }
 result() { # ID DESCRIPTION ok|no
   if [ "$3" = ok ]; then PASS=$((PASS+1)); echo "PASS $1 $2 ($STATUS)"
-  else FAIL=$((FAIL+1)); echo "FAIL $1 $2: got $STATUS $(head -c 300 "$BODY")"; fi
+  else FAIL=$((FAIL+1)); echo "FAIL $1 $2: got $STATUS $(sed -E 's/eyJ[A-Za-z0-9_-]*(\.[A-Za-z0-9_-]*)*/<token hidden>/g' "$BODY" | head -c 300)"; fi # never print a JWT
 }
 skip() { SKIP=$((SKIP+1)); echo "SKIP $1 $2 ($3)"; }
 expect() { # ID DESCRIPTION STATUS [TEXT]: compares the last call
@@ -152,6 +162,127 @@ else
   skip T-AUT-16 "Pwned unreachable → fail open" "needs a second local server with fetch blocked; run on the local run only"
 fi
 
+# ---------- POST /api/auth/login (step 3) ----------
+L=/api/auth/login
+attempt_field() { # emailIp field → value or None
+  AWSF dynamodb get-item --table-name LoginAttempts --key "{\"emailIp\":{\"S\":\"$1\"}}" \
+    --query "Item.$2.[S,N][?@ != null] | [0]" --output text | tr -d '\r'
+}
+attempt_key() { # email → the LoginAttempts key the server made for it (whatever IP it saw)
+  AWSF dynamodb scan --table-name LoginAttempts --filter-expression 'begins_with(emailIp, :e)' \
+    --expression-attribute-values "{\":e\":{\"S\":\"$1#\"}}" --query 'Items[0].emailIp.S' --output text | tr -d '\r'
+}
+set_blocked_until() { # emailIp ISO-time
+  AWSF dynamodb update-item --table-name LoginAttempts --key "{\"emailIp\":{\"S\":\"$1\"}}" \
+    --update-expression 'SET blockedUntil = :b' --expression-attribute-values "{\":b\":{\"S\":\"$2\"}}"
+}
+login() { call POST $L "" "{\"email\":\"$1\",\"password\":\"$2\"}"; }
+iso_in() { node -e "process.stdout.write(new Date(Date.now()+($1)*1000).toISOString())"; } # seconds from now
+
+login "$EMAIL1" "$PW1"
+expect T-AUT-17 "login with the right password" 200 '"token":"'
+TOKEN1=$(json .token)
+! has passwordHash && ! has "$PW1" && [ "$(json .user.userId)" = "$U1" ] && ok=ok || ok=no
+result T-AUT-17 "reply has the token and the account, no password or hash" $ok
+
+CLAIMS=$(node -e "const [h,p]=process.argv[1].split('.').slice(0,2).map(x=>JSON.parse(Buffer.from(x,'base64url')));
+  process.stdout.write([h.alg,p.sub,p.role,p.exp-p.iat,Object.keys(p).sort().join('+')].join(' '))" "$TOKEN1")
+STATUS="alg sub role lifetime claims = $CLAIMS"
+[ "$CLAIMS" = "HS256 $U1 student 3600 exp+iat+role+sub" ] && ok=ok || ok=no
+result T-AUT-18 "JWT: HS256, sub = userId, 1 hour, nothing else inside" $ok
+
+login "$EMAIL1" "wrong-password-$(rand 4)"
+expect T-AUT-19 "wrong password" 401 "Email or password is incorrect."
+cp "$BODY" "$TMP/wrong-pw.json"
+login "t-aut-nobody-$(rand 4 | tr -dc a-z0-9)@example-university.edu" "$(rand)"
+expect T-AUT-20 "unknown email" 401
+cmp -s "$BODY" "$TMP/wrong-pw.json" && ok=ok || ok=no
+STATUS="same body as T-AUT-19: $ok"; result T-AUT-20 "exactly the same reply as a wrong password" $ok
+
+EMAIL3=$(new_email); PW3=$(rand); register "$EMAIL3" "$PW3" "Disabled Student"; U3=$(json .userId)
+AWSF dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$U3\"}}" \
+  --update-expression 'SET #s = :d' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":d":{"S":"disabled"}}'
+login "$EMAIL3" "$PW3"
+expect T-AUT-21 "disabled user with the right password" 401
+cmp -s "$BODY" "$TMP/wrong-pw.json" && ok=ok || ok=no
+STATUS="same body as T-AUT-19: $ok"; result T-AUT-21 "same reply, so it doesn't say the account exists" $ok
+
+AUDIT_D=$(AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --filter-expression 'targetId = :t' \
+  --expression-attribute-names '{"#a":"action"}' --expression-attribute-values "{\":a\":{\"S\":\"login_failed\"},\":t\":{\"S\":\"$EMAIL1\"}}" \
+  --query 'Items[].detail.S' --output text | tr -d '\r')
+STATUS="details: $AUDIT_D"
+echo "$AUDIT_D" | grep -q 'failure 1 from ' && ! echo "$AUDIT_D" | grep -q 'wrong-password' && ok=ok || ok=no
+result T-AUT-22 "login_failed audit row (failure count and IP, no password)" $ok
+LOGIN_N=$(AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --filter-expression 'userId = :u' \
+  --expression-attribute-names '{"#a":"action"}' --expression-attribute-values "{\":a\":{\"S\":\"login\"},\":u\":{\"S\":\"$U1\"}}" \
+  --select COUNT --query Count --output text | tr -d '\r')
+STATUS="login rows $LOGIN_N"; [ "$LOGIN_N" = 1 ] && ok=ok || ok=no
+result T-AUT-22 "login audit row for the successful login" $ok
+
+call POST $L "" "{\"email\":\"$EMAIL1\"}"
+expect T-AUT-23 "login without a password" 400 VALIDATION_ERROR
+call POST $L "" 'email=a' text/plain
+expect T-AUT-23 "login without application/json" 415 UNSUPPORTED_MEDIA_TYPE
+
+# Backoff (§6): 5 failures per email + IP, then blocked 1 min, doubling to 15 min. No lockout of the account.
+EMAIL4=$(new_email); PW4=$(rand); register "$EMAIL4" "$PW4" "Backoff Student"; U4=$(json .userId)
+CODES=""; for i in 1 2 3 4 5; do login "$EMAIL4" "wrong-$i-$(rand 4)"; CODES="$CODES$STATUS "; done
+STATUS="$CODES"; [ "$CODES" = "401 401 401 401 401 " ] && ok=ok || ok=no
+result T-AUT-24 "5 wrong passwords: 401 each" $ok
+K4=$(attempt_key "$EMAIL4")
+login "$EMAIL4" "$PW4"
+expect T-AUT-24 "then even the right password is refused while blocked" 429 TOO_MANY_ATTEMPTS
+RA=$(tr -d '\r' < "$HDRS" | grep -i '^retry-after:' | awk '{print $2}')
+STATUS="key $K4, failures $(attempt_field "$K4" failures), Retry-After $RA"
+[ "$(attempt_field "$K4" failures)" = 5 ] && [ "${RA:-0}" -gt 0 ] && [ "${RA:-0}" -le 60 ] && ok=ok || ok=no
+result T-AUT-24 "LoginAttempts row: 5 failures, blocked for at most 1 minute" $ok
+
+EXP=$(attempt_field "$K4" expiresAt); NOW=$(date +%s)
+STATUS="expiresAt - now = $((EXP - NOW)) s"
+[ $((EXP - NOW)) -gt 86000 ] && [ $((EXP - NOW)) -le 86400 ] && ok=ok || ok=no
+result T-AUT-25 "expiresAt (the TTL attribute) is epoch seconds, about 24 h ahead" $ok
+
+login_xff() { local args=(-s -o "$BODY" -D "$HDRS" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -H "X-Forwarded-For: $1"); STATUS=$(curl "${args[@]}" --data "{\"email\":\"$EMAIL4\",\"password\":\"$PW4\"}" "$API_URL$L"); }
+login_xff 203.0.113.77
+expect T-AUT-26 "a made-up X-Forwarded-For doesn't escape the block" 429 TOO_MANY_ATTEMPTS
+
+# Same email from another IP: seed a block for <email>#198.51.100.9 and log in from here.
+EMAIL5=$(new_email); PW5=$(rand); register "$EMAIL5" "$PW5" "Other IP Student"; U5=$(json .userId)
+AWSF dynamodb put-item --table-name LoginAttempts --item "{\"emailIp\":{\"S\":\"$EMAIL5#198.51.100.9\"},\"failures\":{\"N\":\"9\"},\"blockedUntil\":{\"S\":\"$(iso_in 900)\"},\"expiresAt\":{\"N\":\"$(( $(date +%s) + 86400 ))\"}}"
+login "$EMAIL5" "$PW5"
+expect T-AUT-27 "blocked on another IP only: this IP still logs in (no account lockout)" 200 '"token":"'
+
+# Block over (moved into the past by hand): one more failure blocks for 2 minutes (doubling).
+set_blocked_until "$K4" "$(iso_in -1)"
+login "$EMAIL4" "still-wrong-$(rand 4)"
+expect T-AUT-28 "after the block, a 6th failure" 401
+BU=$(attempt_field "$K4" blockedUntil)
+SECS=$(node -e "process.stdout.write(String(Math.round((Date.parse(process.argv[1])-Date.now())/1000)))" "$BU")
+STATUS="failures $(attempt_field "$K4" failures), blocked for ${SECS}s"
+[ "$(attempt_field "$K4" failures)" = 6 ] && [ "$SECS" -gt 90 ] && [ "$SECS" -le 120 ] && ok=ok || ok=no
+result T-AUT-28 "blocks for 2 minutes now (doubled)" $ok
+set_blocked_until "$K4" "$(iso_in -1)"
+login "$EMAIL4" "$PW4"
+expect T-AUT-29 "after the block, the right password" 200 '"token":"'
+STATUS="failures $(attempt_field "$K4" failures), blockedUntil $(attempt_field "$K4" blockedUntil)"
+[ "$(attempt_field "$K4" failures)" = 0 ] && [ "$(attempt_field "$K4" blockedUntil)" = None ] && ok=ok || ok=no
+result T-AUT-29 "a success resets the count and removes the block" $ok
+
+# review-service's deploy.sh creates the metric filter login-failed on this log group: run its real pattern.
+if [ $GATEWAY = yes ]; then
+  node -e "setTimeout(()=>{},3000)"
+  PATTERN=$(AWSF logs describe-metric-filters --log-group-name /aws/lambda/auth-service --filter-name-prefix login-failed \
+    --query 'metricFilters[0].filterPattern' --output text | tr -d '\r')
+  MF=$(AWSF logs filter-log-events --log-group-name /aws/lambda/auth-service --start-time $(( ($(date +%s) - 600) * 1000 )) \
+    --filter-pattern "$PATTERN" --query 'length(events)' --output text | tr -d '\r')
+  : > "$BODY"
+  STATUS="pattern $PATTERN: $MF matching lines (this run made at least 8)"
+  [ "${MF:-0}" -ge 8 ] && ok=ok || ok=no
+  result T-AUT-30 "login_failed log lines match the metric filter's pattern" $ok
+else
+  skip T-AUT-30 "metric filter pattern on CloudWatch" "the local server logs to its own console; run through the gateway"
+fi
+
 # ---------- secrets never in the logs ----------
 if [ $GATEWAY = yes ]; then
   node -e "setTimeout(()=>{},3000)" # let CloudWatch Logs catch up
@@ -163,17 +294,18 @@ if [ $GATEWAY = yes ]; then
   # Must contain this run's register lines (so the search really covers it) and none of the secrets.
   grep -q 'api/auth/register' "$TMP/cw.log" && ! grep -qF -- "$PW1" "$TMP/cw.log" \
     && ! grep -q 'passwordHash\|\$2b\$\|1234567890' "$TMP/cw.log" && ok=ok || ok=no
-  result T-AUT-17 "no password or hash in auth-service's CloudWatch log" $ok
+  result T-AUT-31 "no password or hash in auth-service's CloudWatch log" $ok
 else
-  skip T-AUT-17 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
+  skip T-AUT-31 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
 fi
 
 # ---------- clean up ----------
-cleanup_users
+cleanup_users; cleanup_attempts
 LEFT=0; for u in "${CREATED[@]}"; do [ "$(user_field "$u" email)" = None ] || LEFT=$((LEFT+1)); done
-STATUS="${#CREATED[@]} accounts created, $LEFT left"; CREATED=()
-[ "$LEFT" = 0 ] && ok=ok || ok=no
-result T-AUT-18 "test accounts deleted again" $ok
+ATT_LEFT=$(test_attempt_keys | grep -c .)
+STATUS="${#CREATED[@]} accounts created, $LEFT left; test LoginAttempts rows left $ATT_LEFT"; CREATED=()
+[ "$LEFT" = 0 ] && [ "$ATT_LEFT" = 0 ] && ok=ok || ok=no
+result T-AUT-32 "test accounts and their LoginAttempts rows deleted again" $ok
 
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"

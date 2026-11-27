@@ -17,6 +17,15 @@ async function emailTaken(email) {
   return res.Count > 0;
 }
 
+// The whole account by email, passwordHash included: only for checking a password, never sent to a client.
+async function findByEmail(email) {
+  const res = await docClient.send(new QueryCommand({
+    TableName: TABLE, IndexName: 'email-index', KeyConditionExpression: 'email = :e',
+    ExpressionAttributeValues: { ':e': email },
+  }));
+  return (res.Items || [])[0] || null;
+}
+
 // New user. attribute_not_exists: never overwrites an existing account.
 async function createUser(user) {
   await docClient.send(new PutCommand({
@@ -24,4 +33,4 @@ async function createUser(user) {
   }));
 }
 
-module.exports = { emailTaken, createUser };
+module.exports = { emailTaken, findByEmail, createUser };

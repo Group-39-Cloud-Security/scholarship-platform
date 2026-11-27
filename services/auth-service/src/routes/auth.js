@@ -7,5 +7,6 @@ const controller = require('../controllers/auth');
 const router = express.Router();
 
 router.post('/register', controller.register); // anyone (no token)
+router.post('/login', controller.login); // anyone (no token)
 
 module.exports = router;
