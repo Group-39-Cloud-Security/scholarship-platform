@@ -1,1 +1,36 @@
-/* style.css — one simple shared stylesheet. Keep the UI plain. */
+/* style.css — one simple shared stylesheet. Keep the UI plain. Owner: Mohamed Khalil (shared shell).
+   The reviewer pages load this file before reviewer.css. The base rules below use the same values as
+   reviewer/reviewer.css, so those pages look exactly as before; everything new is a class they don't use. */
+
+/* ---- base (same values as reviewer.css) ---- */
+body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5; }
+main { max-width: 900px; margin: 0 auto; padding: 1rem; }
+.topbar { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid #ccc; }
+.topbar nav { display: flex; gap: 1rem; align-items: center; }
+table { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+.hint { color: #555; font-size: .9rem; margin: .2rem 0; }
+.message { padding: .5rem .75rem; border-radius: 4px; }
+.message.error { background: #fde8e8; color: #8a1c1c; }
+.message.success { background: #e6f6ea; color: #1d5e2c; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+label { display: block; margin-top: .5rem; }
+textarea, select { width: 100%; max-width: 100%; box-sizing: border-box; }
+button { cursor: pointer; padding: .35rem .8rem; }
+button.link { background: none; border: none; color: inherit; text-decoration: underline; padding: 0; }
+button.danger { background: #8a1c1c; color: #fff; border: none; }
+button.secondary { background: none; border: 1px solid #888; }
+button:disabled { opacity: .6; cursor: default; }
+
+/* ---- shell only (not used by the reviewer pages) ---- */
+main.narrow { max-width: 28rem; }
+.topbar nav a[aria-current="page"] { font-weight: 600; text-decoration: none; }
+.nav-section { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #555; }
+.message.info { background: #e8f0fd; color: #1c3d8a; }
+.form input:not([type="file"]) { width: 100%; max-width: 100%; box-sizing: border-box; padding: .3rem; }
+.box { border: 1px solid #ddd; border-radius: 4px; padding: .5rem 1rem; margin-top: 1.5rem; }
+.timeline { padding-left: 1.25rem; }
+.timeline li.done { font-weight: 600; }
+.timeline li.todo { color: #666; }
