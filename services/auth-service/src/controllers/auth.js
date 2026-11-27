@@ -158,4 +158,62 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login };
+// GET /api/auth/me → 200 the caller's account (authenticate already checked the token and that it is active)
+async function me(req, res, next) {
+  try {
+    const user = await userService.getUser(req.user.userId);
+    if (!user) throw unauthenticated(); // deleted between authenticate and here
+    res.status(200).json(publicUser(user));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PUT /api/auth/password  { currentPassword, newPassword } → 200 the account (mustChangePassword now false)
+// A wrong current password counts against the same email + IP backoff as login, so a stolen token can't be used to
+// guess the password; it is logged and audited as login_failed, so the failed-login alarm sees it too.
+async function changePassword(req, res, next) {
+  try {
+    requireJson(req);
+    const body = bodyOf(req);
+    const current = body.currentPassword;
+    if (typeof current !== 'string' || current.length < 1 || current.length > 1000) {
+      throw validationError('Current password is required.');
+    }
+    const newPassword = checkPassword(body.newPassword, 'New password');
+    if (newPassword === current) throw validationError('New password must be different from the current one.');
+
+    const { userId, email } = req.user;
+    const ip = sourceIp(req);
+    const attempt = await loginAttemptService.getAttempt(email, ip);
+    const blockedFor = attempt && attempt.blockedUntil ? Date.parse(attempt.blockedUntil) - Date.now() : 0;
+    if (blockedFor > 0) {
+      res.locals.action = 'login_blocked';
+      res.set('Retry-After', String(Math.ceil(blockedFor / 1000)));
+      throw tooManyAttempts('Too many failed attempts. Try again later.');
+    }
+
+    const hash = await userService.getPasswordHash(userId);
+    if (!hash || !(await bcrypt.compare(current, hash))) {
+      const failures = await loginAttemptService.recordFailure(email, ip);
+      res.locals.action = 'login_failed';
+      await writeAudit({
+        action: 'login_failed', userId, targetId: email, detail: `wrong current password on password change, failure ${failures} from ${ip}`,
+      });
+      throw validationError('Current password is incorrect.');
+    }
+    await rejectBreachedPassword(newPassword, 'New password');
+
+    const changed = await userService.setPassword(userId, hash, await bcrypt.hash(newPassword, BCRYPT_COST));
+    if (!changed) throw conflict('The password was changed or the account disabled at the same time. Log in again.');
+    if (attempt && attempt.failures) await loginAttemptService.reset(email, ip);
+
+    res.locals.action = 'password_changed';
+    await writeAudit({ action: 'password_changed', userId, targetId: userId, detail: `from ${ip}` });
+    res.status(200).json(publicUser(await userService.getUser(userId)));
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login, me, changePassword };

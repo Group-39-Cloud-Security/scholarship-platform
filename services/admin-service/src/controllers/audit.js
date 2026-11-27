@@ -12,7 +12,7 @@ const auditService = require('../services/auditQueryService');
 
 // Every action any service writes to AuditLog. A service that adds a new action must add it here too.
 const ACTIONS = [
-  'login', 'login_failed', 'forbidden', // auth-service (Phase B) and shared-lib/auth.js
+  'login', 'login_failed', 'password_changed', 'forbidden', // auth-service and shared-lib/auth.js
   'claim', 'claim_expired', 'release', 'review', 'pdf_download', // review-service and release-expired-claims
   'scholarship_created', 'scholarship_updated', 'scholarship_published', 'scholarship_closed', // admin-service
   'decision', 'user_created', 'user_disabled', 'user_enabled', // admin-service

@@ -329,6 +329,80 @@ else
   skip T-AUT-31 "shared auth.js on admin routes (31-35)" "admin routes only exist through the gateway"
 fi
 
+# ---------- GET /api/auth/me and PUT /api/auth/password (step 5) ----------
+ME=/api/auth/me; PWD=/api/auth/password
+call GET $ME ""
+expect T-AUT-36 "GET /me without a token" 401 UNAUTHENTICATED
+call GET $ME "$TOKEN1"
+expect T-AUT-36 "GET /me with the token from T-AUT-17" 200 "\"userId\":\"$U1\""
+! has passwordHash && has '"name":"Test Student"' && has '"mustChangePassword":false' && ok=ok || ok=no
+result T-AUT-36 "the caller's own account, no hash" $ok
+
+pw_body() { echo "{\"currentPassword\":\"$1\",\"newPassword\":\"$2\"}"; }
+call PUT $PWD "" "$(pw_body "$PW1" "$(rand)")"
+expect T-AUT-37 "change password without a token" 401 UNAUTHENTICATED
+call PUT $PWD "$TOKEN1" 'x=1' text/plain
+expect T-AUT-37 "change password as text/plain" 415 UNSUPPORTED_MEDIA_TYPE
+call PUT $PWD "$TOKEN1" "$(pw_body "$PW1" "short")"
+expect T-AUT-37 "new password of 5 characters" 400 "at least 10"
+call PUT $PWD "$TOKEN1" "$(pw_body "$PW1" "$PW1")"
+expect T-AUT-37 "new password same as the current one" 400 "different"
+call PUT $PWD "$TOKEN1" "$(pw_body "$PW1" "1234567890")"
+expect T-AUT-37 "breached new password" 400 "data breach"
+
+K1=$(attempt_key "$EMAIL1") # exists since the wrong-password login in T-AUT-19
+BEFORE=$(attempt_field "$K1" failures)
+call PUT $PWD "$TOKEN1" "$(pw_body "wrong-current-$(rand 4)" "$(rand)")"
+expect T-AUT-38 "wrong current password (400, not 401, so the page doesn't log out)" 400 "Current password is incorrect."
+DET=$(AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --filter-expression 'userId = :u' \
+  --expression-attribute-names '{"#a":"action"}' --expression-attribute-values "{\":a\":{\"S\":\"login_failed\"},\":u\":{\"S\":\"$U1\"}}" \
+  --query 'Items[].detail.S' --output text | tr -d '\r')
+STATUS="failures $BEFORE -> $(attempt_field "$K1" failures); audit: $DET"
+[ "$(attempt_field "$K1" failures)" = $((BEFORE + 1)) ] \
+  && echo "$DET" | grep -q "wrong current password on password change, failure $((BEFORE + 1)) from" && ok=ok || ok=no
+result T-AUT-38 "one more failure in LoginAttempts, audited as login_failed" $ok
+
+NEWPW1=$(rand)
+call PUT $PWD "$TOKEN1" "$(pw_body "$PW1" "$NEWPW1")"
+expect T-AUT-39 "change password" 200 '"mustChangePassword":false'
+login "$EMAIL1" "$PW1"
+expect T-AUT-39 "the old password no longer logs in" 401
+login "$EMAIL1" "$NEWPW1"
+expect T-AUT-39 "the new password does" 200 '"token":"'
+CH=$(AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --filter-expression 'userId = :u' \
+  --expression-attribute-names '{"#a":"action"}' --expression-attribute-values "{\":a\":{\"S\":\"password_changed\"},\":u\":{\"S\":\"$U1\"}}" \
+  --select COUNT --query Count --output text | tr -d '\r')
+STATUS="password_changed rows $CH, failures now $(attempt_field "$K1" failures)"
+[ "$CH" = 1 ] && [ "$(attempt_field "$K1" failures)" = 0 ] && ok=ok || ok=no
+result T-AUT-39 "password_changed audit row; the failure count is reset" $ok
+
+# A reviewer created by an admin starts with mustChangePassword (set by hand here): only /me and /password work.
+EMAIL7=$(new_email); PW7=$(rand); register "$EMAIL7" "$PW7" "Temp Password"; U7=$(json .userId)
+AWSF dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$U7\"}}" --update-expression 'SET mustChangePassword = :t, #r = :a' \
+  --expression-attribute-names '{"#r":"role"}' --expression-attribute-values '{":t":{"BOOL":true},":a":{"S":"admin"}}'
+login "$EMAIL7" "$PW7"; TOKEN7=$(json .token)
+has '"mustChangePassword":true' && ok=ok || ok=no; result T-AUT-40 "login says mustChangePassword: true" $ok
+call GET $ME "$TOKEN7"
+expect T-AUT-40 "GET /me still works" 200 '"mustChangePassword":true'
+if [ $GATEWAY = yes ]; then
+  call GET /api/admin/stats "$TOKEN7"
+  expect T-AUT-40 "an admin route doesn't, yet" 403 "Change your temporary password first."
+fi
+NEWPW7=$(rand)
+call PUT $PWD "$TOKEN7" "$(pw_body "$PW7" "$NEWPW7")"
+expect T-AUT-40 "PUT /password works and clears the flag" 200 '"mustChangePassword":false'
+if [ $GATEWAY = yes ]; then
+  call GET /api/admin/stats "$TOKEN7"
+  expect T-AUT-40 "the same token now reaches the admin route" 200 '"scholarships"'
+fi
+
+# Guessing the current password with a stolen token hits the same backoff as login.
+CODES=""; for i in 1 2 3 4 5; do call PUT $PWD "$TOKEN7" "$(pw_body "wrong-$i-$(rand 4)" "$(rand)")"; CODES="$CODES$STATUS "; done
+call PUT $PWD "$TOKEN7" "$(pw_body "$NEWPW7" "$(rand)")"
+STATUS="$CODES then $STATUS"
+[ "$CODES" = "400 400 400 400 400 " ] && echo "$STATUS" | grep -q '429$' && ok=ok || ok=no
+result T-AUT-41 "5 wrong current passwords, then even the right one gets 429" $ok
+
 # ---------- secrets never in the logs ----------
 if [ $GATEWAY = yes ]; then
   node -e "setTimeout(()=>{},3000)" # let CloudWatch Logs catch up
@@ -338,11 +412,11 @@ if [ $GATEWAY = yes ]; then
   EVENTS=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')||'[]').length))" "$(winpath "$TMP/cw.log")")
   STATUS="$EVENTS log events searched"
   # Must contain this run's register lines (so the search really covers it) and none of the secrets.
-  grep -q 'api/auth/register' "$TMP/cw.log" && ! grep -qF -- "$PW1" "$TMP/cw.log" \
+  grep -q 'api/auth/register' "$TMP/cw.log" && ! grep -qF -- "$PW1" "$TMP/cw.log" && ! grep -qF -- "$NEWPW1" "$TMP/cw.log" \
     && ! grep -q 'passwordHash\|\$2b\$\|1234567890' "$TMP/cw.log" && ok=ok || ok=no
-  result T-AUT-36 "no password or hash in auth-service's CloudWatch log" $ok
+  result T-AUT-42 "no password or hash in auth-service's CloudWatch log" $ok
 else
-  skip T-AUT-36 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
+  skip T-AUT-42 "CloudWatch log search" "the local server logs to its own console; run through the gateway"
 fi
 
 # ---------- clean up ----------
@@ -351,7 +425,7 @@ LEFT=0; for u in "${CREATED[@]}"; do [ "$(user_field "$u" email)" = None ] || LE
 ATT_LEFT=$(test_attempt_keys | grep -c .)
 STATUS="${#CREATED[@]} accounts created, $LEFT left; test LoginAttempts rows left $ATT_LEFT"; CREATED=()
 [ "$LEFT" = 0 ] && [ "$ATT_LEFT" = 0 ] && ok=ok || ok=no
-result T-AUT-37 "test accounts and their LoginAttempts rows deleted again" $ok
+result T-AUT-43 "test accounts and their LoginAttempts rows deleted again" $ok
 
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"

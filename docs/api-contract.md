@@ -63,6 +63,29 @@ The token is a JWT, HS256, valid 1 hour, signed with `/scholarship/jwt-secret` (
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
 | 429 | `TOO_MANY_ATTEMPTS` | this email + IP is blocked (see `LoginAttempts`); the password is not checked, `Retry-After` gives the seconds left. Logged as `"action":"login_blocked"`, no audit row (a flood of blocked guesses can't flood `AuditLog`) |
 
+### GET /api/auth/me  [any logged-in user]
+`200`, the caller's own account (works while `mustChangePassword` is true):
+```json
+{ "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false }
+```
+`401 UNAUTHENTICATED`: no, malformed, badly signed or expired token, unknown or disabled user.
+
+### PUT /api/auth/password  [any logged-in user]
+```json
+{ "currentPassword": "the old one", "newPassword": "a new long passphrase" }
+```
+`200`, the account with `mustChangePassword: false`. Writes a `password_changed` audit row. The only other route a user with `mustChangePassword: true` can call besides `GET /me`.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | current password missing or wrong ("Current password is incorrect."; 400, not 401, so the page does not log out), new password shorter than 10 or longer than 72 bytes, same as the current one, or found in Pwned Passwords. A wrong current password counts against the same email + IP backoff as login and is logged and audited as `login_failed` |
+| 401 | `UNAUTHENTICATED` | no or bad token |
+| 409 | `CONFLICT` | the password was changed or the account disabled at the same moment (conditional update on the checked hash) |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+| 429 | `TOO_MANY_ATTEMPTS` | this email + IP is blocked; `Retry-After` gives the seconds left |
+
+Limitation: tokens issued before a password change stay valid until they expire (at most 1 hour); there is no token revocation list.
+
 ## application-service
 
 Owner: Mohamed Khalil. Lambda `application-service`. Every route needs `Authorization: Bearer <token>`; the allowed role is in brackets. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'`.
@@ -573,7 +596,7 @@ Rules (§6 Accounts):
 `400` id invalid or status not `active`/`disabled`, `401`, `403`, `404 USER_NOT_FOUND`, `409`, `415`
 
 ### GET /api/admin/audit-log?action=&since=&limit=&next=  [admin]
-- `action` (required): one of `login`, `login_failed`, `forbidden`, `claim`, `claim_expired`, `release`, `review`, `pdf_download`, `scholarship_created`, `scholarship_updated`, `scholarship_published`, `scholarship_closed`, `decision`, `user_created`, `user_disabled`, `user_enabled`. It is the table's partition key, so every call is one Query, never a Scan. **A service that writes a new action must add it to this list** (`src/controllers/audit.js`).
+- `action` (required): one of `login`, `login_failed`, `password_changed`, `forbidden`, `claim`, `claim_expired`, `release`, `review`, `pdf_download`, `scholarship_created`, `scholarship_updated`, `scholarship_published`, `scholarship_closed`, `decision`, `user_created`, `user_disabled`, `user_enabled`, `email_sent`, `email_failed`. It is the table's partition key, so every call is one Query, never a Scan. **A service that writes a new action must add it to this list** (`src/controllers/audit.js`).
 - `since` (optional): a full ISO 8601 date-time with a zone, same rules as a deadline. Rows with `createdAt` >= since.
 - `limit` (optional): 1-100, default 50. 100 is a hard cap per call.
 - `next` (optional): the `next` value from the previous page. Only accepted for the same `action`.
