@@ -1,6 +1,62 @@
-# REST Client tests for application-service. Copy rows into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
+# REST Client (VS Code) requests for application-service — for clicking through by hand.
+# The full automated run with every status code is tests/api-tests.js (npm run test:api).
+# Put your API id below (printed by deploy.sh). Locally use http://localhost:3000.
 @baseUrl = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
-@token = PASTE_TOKEN_FROM_get-token.sh
+# Phase A test users (shared-lib/auth.js): test-student-1, test-student-2, test-reviewer, test-admin
+@student = test-student-1
 
-### T-APP-01 health / first normal case
-# TODO: one normal, one invalid (400), one unauthenticated (401), one wrong role (403), one other-user record (404) per function
+### Browse published scholarships → 200 [...]
+GET {{baseUrl}}/api/scholarships
+Authorization: Bearer {{student}}
+
+### Search → 200 (only titles/descriptions containing "merit")
+GET {{baseUrl}}/api/scholarships?search=merit
+Authorization: Bearer {{student}}
+
+### One scholarship → 200
+GET {{baseUrl}}/api/scholarships/test-open
+Authorization: Bearer {{student}}
+
+### A draft is hidden → 404 SCHOLARSHIP_NOT_FOUND
+GET {{baseUrl}}/api/scholarships/test-draft
+Authorization: Bearer {{student}}
+
+### No token → 401 UNAUTHENTICATED
+GET {{baseUrl}}/api/scholarships
+
+### Apply with the wrong Content-Type → 415
+POST {{baseUrl}}/api/applications
+Authorization: Bearer {{student}}
+Content-Type: text/plain
+
+hello
+
+### Apply as admin → 403 FORBIDDEN (and a "forbidden" row in AuditLog)
+POST {{baseUrl}}/api/applications
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{}
+
+### Apply with a short essay → 400 VALIDATION_ERROR
+POST {{baseUrl}}/api/applications
+Authorization: Bearer {{student}}
+Content-Type: application/json
+
+{ "scholarshipId": "test-open", "essay": "too short", "gpa": 3.2, "yearOfStudy": 2, "pdfBase64": "JVBERi0xLjQK" }
+
+### My applications (with timeline) → 200 [...]
+GET {{baseUrl}}/api/applications/mine
+Authorization: Bearer {{student}}
+
+### Download my PDF → 200 { url, expiresIn: 300 }   (paste an applicationId from "mine")
+GET {{baseUrl}}/api/applications/PASTE_ID/pdf
+Authorization: Bearer {{student}}
+
+### Same PDF as another student → 404 APPLICATION_NOT_FOUND
+GET {{baseUrl}}/api/applications/PASTE_ID/pdf
+Authorization: Bearer test-student-2
+
+### Withdraw → 204 (only while submitted and before the deadline)
+DELETE {{baseUrl}}/api/applications/PASTE_ID
+Authorization: Bearer {{student}}

@@ -6,7 +6,10 @@
     "dev": "node --watch src/server.js",
     "sync-shared": "bash scripts/sync-shared.sh",
     "zip": "node scripts/zip-lambda.js",
-    "deploy": "bash infra/deploy.sh"
+    "deploy": "bash infra/deploy.sh",
+    "test": "node --test tests/unit.test.js",
+    "test:api": "node tests/api-tests.js",
+    "test-data": "node scripts/test-scholarships.js"
   },
   "dependencies": {
     "express": "^5.1.0",
