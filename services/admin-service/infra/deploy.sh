@@ -5,7 +5,7 @@
 # Safe to re-run: every step checks whether the thing already exists, and updates it if it does.
 #
 # Built step by step. Still to come:
-#   - SQS notifications-dlq + notifications (redrive, maxReceiveCount 3), SSM /scholarship/brevo-api-key from local .env,
+#   - SSM /scholarship/brevo-api-key from local .env,
 #     notification-sender role + Lambda + SQS event source mapping (step 8)
 #   - the admin routes from §8, added in the step that builds each one
 set -e
@@ -39,6 +39,51 @@ else
   echo "table Scholarships exists"
 fi
 
+# ---------- 1b. LOCAL TEST FIXTURE: Applications table ------------------------------------------------
+# Applications belongs to application-service (Khalil, CLAUDE.md §5). It is created here ONLY so admin-service's
+# decision step can be tested on Floci before his deploy.sh exists. Same key and indexes as §5, and it is only
+# created if missing, so his script's table wins once it runs first.
+# REMOVE THIS WHOLE SECTION when services/application-service/infra/deploy.sh creates the table.
+if ! aws dynamodb describe-table --table-name Applications >/dev/null 2>&1; then
+  aws dynamodb create-table --table-name Applications \
+    --attribute-definitions AttributeName=applicationId,AttributeType=S AttributeName=studentId,AttributeType=S \
+      AttributeName=scholarshipId,AttributeType=S AttributeName=status,AttributeType=S AttributeName=submittedAt,AttributeType=S \
+    --key-schema AttributeName=applicationId,KeyType=HASH \
+    --global-secondary-indexes '[
+      {"IndexName":"studentId-index","KeySchema":[{"AttributeName":"studentId","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}},
+      {"IndexName":"scholarshipId-index","KeySchema":[{"AttributeName":"scholarshipId","KeyType":"HASH"},{"AttributeName":"submittedAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
+      {"IndexName":"status-index","KeySchema":[{"AttributeName":"status","KeyType":"HASH"},{"AttributeName":"submittedAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+    --billing-mode PAY_PER_REQUEST >/dev/null
+  aws dynamodb wait table-exists --table-name Applications
+  echo "created table Applications (LOCAL TEST FIXTURE, owned by application-service)"
+else
+  echo "table Applications exists"
+fi
+# ---------- end of LOCAL TEST FIXTURE ----------------------------------------------------------------
+
+# ---------- 1c. SQS: notifications-dlq, then notifications with a redrive policy (§2, §6 Deciding) ----------
+# A decision email message that fails 3 times (notification-sender throws) moves to notifications-dlq instead of
+# being retried forever or lost. Visibility timeout 90 s = 6 × the sender's 15 s Lambda timeout (AWS guidance for
+# SQS event sources), so a message isn't handed out again while a sender is still working on it.
+# $1 queue name, $2 attributes JSON. Creates the queue, or re-applies the attributes so edits apply. Prints the URL.
+ensure_queue() {
+  local url
+  url=$(aws sqs get-queue-url --queue-name "$1" --query QueueUrl --output text 2>/dev/null | tr -d '\r' || true)
+  if [ -z "$url" ] || [ "$url" = "None" ]; then
+    url=$(aws sqs create-queue --queue-name "$1" --attributes "$2" --query QueueUrl --output text | tr -d '\r')
+    echo "created queue $1" >&2
+  else
+    aws sqs set-queue-attributes --queue-url "$url" --attributes "$2"
+    echo "queue $1 exists (attributes re-applied)" >&2
+  fi
+  echo "$url"
+}
+DLQ_URL=$(ensure_queue notifications-dlq '{"MessageRetentionPeriod":"1209600"}')   # keep failed messages 14 days
+DLQ_ARN=$(aws sqs get-queue-attributes --queue-url "$DLQ_URL" --attribute-names QueueArn \
+  --query Attributes.QueueArn --output text | tr -d '\r')
+QUEUE_ATTRS=$(printf '{"VisibilityTimeout":"90","RedrivePolicy":"{\\"deadLetterTargetArn\\":\\"%s\\",\\"maxReceiveCount\\":\\"3\\"}"}' "$DLQ_ARN")
+QUEUE_URL=$(ensure_queue notifications "$QUEUE_ATTRS")
+
 # ---------- 2. IAM role (least privilege, policy in infra/iam/) ----------
 ensure_role() { # $1 = role name. Creates it if missing, then (re)writes its inline policy so edits apply.
   if ! aws iam get-role --role-name "$1" >/dev/null 2>&1; then
@@ -70,8 +115,7 @@ ensure_function() {
 }
 
 # Only the variables admin-service needs (§4). No endpoints or keys: Floci injects AWS_ENDPOINT_URL.
-# NOTIFICATIONS_QUEUE_URL is added in step 8, when the queue exists.
-ADMIN_ENV=$(printf '{"Variables":{"NODE_ENV":"production","CORS_ORIGINS":"%s","ALLOWED_DOMAINS":"%s","SCHOLARSHIPS_TABLE":"Scholarships","APPLICATIONS_TABLE":"Applications","REVIEWS_TABLE":"Reviews","USERS_TABLE":"Users","AUDIT_TABLE":"AuditLog","JWT_SECRET_PARAM":"/scholarship/jwt-secret"}}' "$CORS_ORIGINS" "$ALLOWED_DOMAINS")
+ADMIN_ENV=$(printf '{"Variables":{"NODE_ENV":"production","CORS_ORIGINS":"%s","ALLOWED_DOMAINS":"%s","SCHOLARSHIPS_TABLE":"Scholarships","APPLICATIONS_TABLE":"Applications","REVIEWS_TABLE":"Reviews","USERS_TABLE":"Users","AUDIT_TABLE":"AuditLog","JWT_SECRET_PARAM":"/scholarship/jwt-secret","NOTIFICATIONS_QUEUE_URL":"%s"}}' "$CORS_ORIGINS" "$ALLOWED_DOMAINS" "$QUEUE_URL")
 
 ensure_function admin-service src/lambda.handler lambda.zip "$ADMIN_ENV"
 ADMIN_ARN="arn:aws:lambda:$REGION:$ACCOUNT:function:admin-service"
