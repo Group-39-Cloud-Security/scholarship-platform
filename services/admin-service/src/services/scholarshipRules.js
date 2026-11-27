@@ -13,6 +13,8 @@ const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\
 
 // Deadline as a full ISO 8601 date-time with a zone (Z or ±hh:mm). Every part is range-checked by hand because
 // Date.parse rolls impossible dates over (2027-02-30 would become 2 March) instead of rejecting them.
+// Zone offsets go up to ±14:00 (the real-world maximum). -00:00 is rejected on purpose: RFC 3339 uses it for
+// "local offset unknown", and a deadline must be one known instant for every student. Use Z for UTC.
 // May be in the past on a draft: §6 only requires a future deadline at publish.
 // Stored in one format (UTC, toISOString) so the status-deadline-index sorts correctly.
 function checkDeadline(value) {
@@ -21,7 +23,8 @@ function checkDeadline(value) {
   if (!m) throw bad();
   const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6] || '0'].map(Number);
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate(); // day 0 of the next month = last day of this one
-  const zoneOk = m[7] === 'Z' || (Number(m[9]) <= 14 && Number(m[10]) <= 59);
+  const offsetMinutes = m[7] === 'Z' ? 0 : Number(m[9]) * 60 + Number(m[10]);
+  const zoneOk = m[7] === 'Z' || (Number(m[10]) <= 59 && offsetMinutes <= 14 * 60 && m[7] !== '-00:00');
   if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > daysInMonth
       || hour > 23 || minute > 59 || second > 59 || !zoneOk) {
     throw bad();

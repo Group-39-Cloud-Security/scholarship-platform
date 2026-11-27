@@ -216,3 +216,33 @@ Content-Type: application/json
   ],
   "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
 }
+
+### T-ADM-23 zone offset above +14:00 (or -00:00, "unknown local offset"): 400. +14:00 itself is accepted.
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00+14:30", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-24 29 February in a year that is not a leap year: 400 (2028-02-29 is accepted)
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-02-29T12:00:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}

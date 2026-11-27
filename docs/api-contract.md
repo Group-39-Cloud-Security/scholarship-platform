@@ -182,7 +182,7 @@ Proves API Gateway reaches the Lambda. Says nothing about tables, versions or se
 | scholarshipId | string (UUID) | Server | `crypto.randomUUID()`; a value in the body is ignored |
 | title | string | Client | trimmed, 3-100 characters |
 | description | string | Client | trimmed, 10-2000 characters |
-| deadline | ISO 8601 UTC | Client | a full date-time with a zone: `2027-01-15T23:59:00Z` or `2027-01-16T01:59:00+02:00`. A bare date (`2027-01-15`), a missing zone, or a date that doesn't exist (`2027-02-30`, `2027-04-31`) is a 400, never rolled over. Year 2000-2100. Stored as `toISOString()` (UTC) so `status-deadline-index` sorts correctly. **May be in the past on a draft**; must be in the future to publish (409, see below) |
+| deadline | ISO 8601 UTC | Client | a full date-time with a zone: `2027-01-15T23:59:00Z` or `2027-01-16T01:59:00+02:00`. A bare date (`2027-01-15`), a missing zone, or a date that doesn't exist (`2027-02-30`, `2027-04-31`, `2027-02-29`) is a 400, never rolled over. Zone offsets from `-14:00` to `+14:00`; anything beyond is a 400. `-00:00` is a 400 on purpose (RFC 3339: "local offset unknown"; a deadline must be one known instant), use `Z` for UTC. Year 2000-2100. Stored as `toISOString()` (UTC) so `status-deadline-index` sorts correctly. **May be in the past on a draft**; must be in the future to publish (409, see below) |
 | awards | int | Client | 1-1000; how many applications can be accepted |
 | acceptedCount | int | Server | starts at 0; atomic counter, never more than `awards` |
 | status | enum | Server | `draft` on create, then `published`, `closed` (PATCH status) |

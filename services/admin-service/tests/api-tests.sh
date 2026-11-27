@@ -163,6 +163,12 @@ call POST $S test-admin "$(with 'b=>b.deadline="2027-02-30T10:00:00Z"')"
 expect T-ADM-21 "deadline 30 February" 400 "ISO 8601"
 call POST $S test-admin "$(with 'b=>b.deadline="2027-04-31T10:00:00Z"')"
 expect T-ADM-21 "deadline 31 April" 400 "ISO 8601"
+call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:30"')"
+expect T-ADM-23 "zone offset +14:30 (above the 14:00 maximum)" 400 "ISO 8601"
+call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00-00:00"')"
+expect T-ADM-23 "zone offset -00:00 (unknown local offset)" 400 "ISO 8601"
+call POST $S test-admin "$(with 'b=>b.deadline="2027-02-29T12:00:00Z"')"
+expect T-ADM-24 "29 February in 2027 (not a leap year)" 400 "ISO 8601"
 
 if [ $HAVE_AWS = yes ]; then
   STATUS="Scholarships $COUNT_BEFORE -> $(count_scholarships)"
@@ -189,6 +195,12 @@ expect T-ADM-22 "draft with a past deadline is allowed (future only checked at p
 
 call POST $S test-admin "$(with 'b=>b.deadline="2027-01-16T01:59:00+02:00"')"
 expect T-ADM-22 "deadline with +02:00 stored in UTC" 201 '"deadline":"2027-01-15T23:59:00.000Z"'
+
+call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:00"')"
+expect T-ADM-23 "zone offset +14:00 (the maximum) accepted, stored in UTC" 201 '"deadline":"2027-01-15T09:59:00.000Z"'
+
+call POST $S test-admin "$(with 'b=>b.deadline="2028-02-29T12:00:00Z"')"
+expect T-ADM-24 "29 February 2028 (a leap year) accepted" 201 '"deadline":"2028-02-29T12:00:00.000Z"'
 
 # ---------- routes that are not listed ----------
 if [ $GATEWAY = yes ]; then
