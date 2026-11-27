@@ -364,3 +364,71 @@ Content-Type: application/json
 ### T-ADM-38 publish a corrupt or legacy record (awards 0, or weights not summing to 100): 409, nothing changes.
 # The API never stores such a record, so the runner writes it straight into DynamoDB, tries the publish, and deletes it:
 # only in tests/api-tests.sh
+
+# ---------- PATCH /api/admin/applications/{id}/decision ----------
+# Needs a reviewed application in Applications (application-service + review-service make one; the runner seeds
+# its own straight into DynamoDB). Paste its applicationId here.
+@app = PASTE_APPLICATION_ID
+
+### T-ADM-39 no token: 401 (student or reviewer token: 403)
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Content-Type: application/json
+
+{ "decision": "accepted" }
+
+### T-ADM-40 decision that is not accepted/rejected: 400 (unknown id: 404, text/plain: 415)
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "maybe" }
+
+### T-ADM-41 application that is not reviewed yet: 409
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "rejected" }
+
+### T-ADM-42 accept a flagged application: 409 A flagged application can only be rejected
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "accepted" }
+
+### T-ADM-43 reject a flagged application: 200; the queue message carries the flag reason
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "rejected" }
+
+### T-ADM-44 accept a reviewed application: 200 emailStatus queued, acceptedCount + 1
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "accepted" }
+
+### T-ADM-45 decide it again: 409 already accepted (a decision is final)
+PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "rejected" }
+
+### T-ADM-46 awards limit: 3 parallel accepts with 1 award, exactly one wins — parallel requests, only in tests/api-tests.sh
+
+### T-ADM-47 rollback: the same application accepted 5 times at once, acceptedCount ends at 1 — only in tests/api-tests.sh
+
+### T-ADM-48 the test applications and reviews are deleted again — only in tests/api-tests.sh
+
+### T-ADM-49 email failure: start a second local server with a queue that doesn't exist, then accept through it
+# PORT=3099 NOTIFICATIONS_QUEUE_URL=http://localhost:4566/000000000000/queue-that-does-not-exist node src/server.js
+# Expected: 200 with "emailStatus": "failed"; the application stays accepted and the award stays taken.
+PATCH http://localhost:3099/api/admin/applications/{{app}}/decision
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "decision": "accepted" }

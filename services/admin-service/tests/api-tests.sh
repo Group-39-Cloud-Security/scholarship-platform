@@ -216,7 +216,7 @@ new_draft() {
 }
 field() { # $1 id, $2 attribute: prints the stored value (S or N) straight from DynamoDB
   AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb get-item --table-name Scholarships \
-    --key "{\"scholarshipId\":{\"S\":\"$1\"}}" --query "Item.$2.[S,N][0]" --output text | tr -d '\r'
+    --key "{\"scholarshipId\":{\"S\":\"$1\"}}" --query "Item.$2.S || Item.$2.N" --output text | tr -d '\r'
 }
 count_action() { # $1 action: number of AuditLog rows for it
   AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb query --table-name AuditLog \
@@ -375,6 +375,196 @@ if [ $HAVE_AWS = yes ]; then
   [ "$(field "$BAD_AWARDS" status)" = None ] && [ "$(field "$BAD_RUBRIC" status)" = None ] && ok=ok || ok=no
   result T-ADM-38 "test records deleted again" $ok
 else skip T-ADM-38 "publish a corrupt stored record" "no AWS CLI"; fi
+
+# ---------- PATCH /api/admin/applications/{id}/decision (step 5) ----------
+# Applications and Reviews rows are written straight into DynamoDB (application-service and review-service make
+# them in real use) and deleted again at the end. Queue messages the tests read are deleted after reading.
+DEC=/api/admin/applications
+uuid() { node -e 'process.stdout.write(require("crypto").randomUUID())'; }
+published_scholarship() { # $1 awards: creates and publishes a scholarship, prints its id
+  local id; id=$(new_draft "b=>b.awards=$1")
+  call PATCH $S/$id/status test-admin "$PUB"
+  echo "$id"
+}
+SEEDED_APPS=(); SEEDED_REVIEWS=()
+seed_app() { # $1 id, $2 scholarshipId, $3 status, $4 flagged (true|false)
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Applications --item \
+    "{\"applicationId\":{\"S\":\"$1\"},\"studentId\":{\"S\":\"test-student-1\"},\"studentEmail\":{\"S\":\"student1@example-university.edu\"},\"scholarshipId\":{\"S\":\"$2\"},\"status\":{\"S\":\"$3\"},\"flagged\":{\"BOOL\":$4},\"essay\":{\"S\":\"Essay text that must never reach the queue.\"},\"submittedAt\":{\"S\":\"2026-11-20T10:00:00.000Z\"}}"
+  SEEDED_APPS+=("$1")
+}
+seed_flag_review() { # $1 applicationId, $2 flagReason
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Reviews --item \
+    "{\"applicationId\":{\"S\":\"$1\"},\"reviewerId\":{\"S\":\"test-reviewer\"},\"flagged\":{\"BOOL\":true},\"flagReason\":{\"S\":\"$2\"},\"flagNote\":{\"S\":\"private note\"},\"submittedAt\":{\"S\":\"2026-11-21T10:00:00.000Z\"}}"
+  SEEDED_REVIEWS+=("$1")
+}
+app_field() { # $1 applicationId, $2 attribute
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb get-item --table-name Applications \
+    --key "{\"applicationId\":{\"S\":\"$1\"}}" --query "Item.$2.S || Item.$2.N" --output text | tr -d '\r'
+}
+QURL=""; [ $HAVE_AWS = yes ] && QURL=$(AWS_PROFILE=floci aws sqs get-queue-url --queue-name notifications --query QueueUrl --output text 2>/dev/null | tr -d '\r')
+take_messages() { # reads every waiting message into $TMP/messages (one JSON body per line), deleting each one
+  : > "$TMP/messages"
+  local out
+  for _ in 1 2 3 4 5; do
+    out=$(AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws sqs receive-message --queue-url "$QURL" --max-number-of-messages 10 \
+      --wait-time-seconds 1 --output json | tr -d '\r')
+    [ -z "$out" ] && break
+    node -e 'for (const m of JSON.parse(process.argv[1]).Messages || []) console.log(m.Body + "\t" + m.ReceiptHandle)' "$out" > "$TMP/batch"
+    [ -s "$TMP/batch" ] || break
+    while IFS=$'\t' read -r body handle; do
+      printf '%s\n' "$body" >> "$TMP/messages"
+      AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws sqs delete-message --queue-url "$QURL" --receipt-handle "$handle"
+    done < "$TMP/batch"
+  done
+}
+message_for() { grep -F "\"applicationId\":\"$1\"" "$TMP/messages" | head -1; }
+
+if [ $HAVE_AWS = yes ]; then
+  take_messages # start with an empty queue
+  SCH=$(published_scholarship 2)
+  A_OK=$(uuid); A_FLAG=$(uuid); A_SUB=$(uuid); A_UNDER=$(uuid)
+  seed_app "$A_OK" "$SCH" reviewed false
+  seed_app "$A_FLAG" "$SCH" reviewed true; seed_flag_review "$A_FLAG" ineligible
+  seed_app "$A_SUB" "$SCH" submitted false
+  seed_app "$A_UNDER" "$SCH" under_review false
+  ACC='{"decision":"accepted"}'; REJ='{"decision":"rejected"}'
+
+  call PATCH $DEC/$A_OK/decision "" "$ACC"
+  expect T-ADM-39 "decision, no token" 401 UNAUTHENTICATED
+  call PATCH $DEC/$A_OK/decision test-student-1 "$ACC"
+  expect T-ADM-39 "decision, student token" 403 FORBIDDEN
+  call PATCH $DEC/$A_OK/decision test-reviewer "$ACC"
+  expect T-ADM-39 "decision, reviewer token" 403 FORBIDDEN
+
+  call PATCH $DEC/not-a-uuid/decision test-admin "$ACC"
+  expect T-ADM-40 "id that is not a UUID" 400 "Application id"
+  call PATCH $DEC/$UNKNOWN/decision test-admin "$ACC"
+  expect T-ADM-40 "unknown application" 404 APPLICATION_NOT_FOUND
+  call PATCH $DEC/$A_OK/decision test-admin "$ACC" text/plain
+  expect T-ADM-40 "Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
+  for bad in '{"decision":"maybe"}' '{"decision":"reviewed"}' '{}'; do
+    call PATCH $DEC/$A_OK/decision test-admin "$bad"
+    expect T-ADM-40 "decision $bad" 400 "Decision must be one of"
+  done
+
+  call PATCH $DEC/$A_SUB/decision test-admin "$REJ"
+  expect T-ADM-41 "decide a submitted application" 409 "Only a reviewed application can be decided"
+  call PATCH $DEC/$A_UNDER/decision test-admin "$ACC"
+  expect T-ADM-41 "decide an application under review" 409 "Only a reviewed application can be decided"
+
+  call PATCH $DEC/$A_FLAG/decision test-admin "$ACC"
+  expect T-ADM-42 "accept a flagged application" 409 "A flagged application can only be rejected"
+  STATUS="acceptedCount $(field "$SCH" acceptedCount), status $(app_field "$A_FLAG" status)"
+  [ "$(field "$SCH" acceptedCount)" = 0 ] && [ "$(app_field "$A_FLAG" status)" = reviewed ] && ok=ok || ok=no
+  result T-ADM-42 "refused accept took no award and changed nothing" $ok
+
+  DECISIONS_BEFORE=$(count_action decision)
+  call PATCH $DEC/$A_FLAG/decision test-admin "$REJ"
+  expect T-ADM-43 "reject a flagged application" 200 '"status":"rejected"'
+  call PATCH $DEC/$A_OK/decision test-admin "$ACC"
+  expect T-ADM-44 "accept a reviewed application" 200 '"emailStatus":"queued"'
+  STATUS="status $(app_field "$A_OK" status), decidedBy $(app_field "$A_OK" decidedBy), emailStatus $(app_field "$A_OK" emailStatus), acceptedCount $(field "$SCH" acceptedCount)"
+  [ "$(app_field "$A_OK" status)" = accepted ] && [ "$(app_field "$A_OK" decidedBy)" = test-admin ] \
+    && [ "$(app_field "$A_OK" emailStatus)" = queued ] && [ "$(field "$SCH" acceptedCount)" = 1 ] && ok=ok || ok=no
+  result T-ADM-44 "stored: accepted, decidedBy from token, emailStatus queued, acceptedCount 1" $ok
+  STATUS="AuditLog decision $DECISIONS_BEFORE -> $(count_action decision)"
+  [ "$(count_action decision)" -eq $((DECISIONS_BEFORE + 2)) ] && ok=ok || ok=no
+  result T-ADM-44 "one decision row per decision (2) in AuditLog" $ok
+
+  take_messages
+  MSG_FLAG=$(message_for "$A_FLAG"); MSG_OK=$(message_for "$A_OK")
+  STATUS="$MSG_FLAG"
+  node -e '
+const m = JSON.parse(process.argv[1] || "{}");
+const keys = Object.keys(m).sort().join(",");
+process.exit(keys === "applicationId,decision,flagReason,scholarshipTitle,studentEmail" && m.decision === "rejected"
+  && m.flagReason === "ineligible" && m.studentEmail === "student1@example-university.edu" && m.scholarshipTitle ? 0 : 1);' "$MSG_FLAG" && ok=ok || ok=no
+  result T-ADM-43 "queue message: exactly the 5 fields, flagReason ineligible, no essay/note/reviewer" $ok
+  STATUS="$MSG_OK"
+  node -e '
+const m = JSON.parse(process.argv[1] || "{}");
+process.exit(Object.keys(m).sort().join(",") === "applicationId,decision,scholarshipTitle,studentEmail" && m.decision === "accepted" ? 0 : 1);' "$MSG_OK" && ok=ok || ok=no
+  result T-ADM-44 "queue message: 4 fields, decision accepted, no flagReason" $ok
+
+  call PATCH $DEC/$A_OK/decision test-admin "$REJ"
+  expect T-ADM-45 "decide again after accepting" 409 "already accepted"
+  STATUS="acceptedCount $(field "$SCH" acceptedCount), status $(app_field "$A_OK" status)"
+  [ "$(field "$SCH" acceptedCount)" = 1 ] && [ "$(app_field "$A_OK" status)" = accepted ] && ok=ok || ok=no
+  result T-ADM-45 "final decision unchanged, counter unchanged" $ok
+
+  # Awards limit: 1 award, 3 different reviewed applications accepted at the same time.
+  LIM=$(published_scholarship 1)
+  L1=$(uuid); L2=$(uuid); L3=$(uuid)
+  for a in $L1 $L2 $L3; do seed_app "$a" "$LIM" reviewed false; done
+  for a in $L1 $L2 $L3; do
+    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+      -H 'Content-Type: application/json' --data "$ACC" "$API_URL$DEC/$a/decision" > "$TMP/lim-$a" &
+  done
+  wait
+  CODES="$(cat "$TMP"/lim-* | tr -d '\r')"
+  WON=$(printf '%s\n' "$CODES" | grep -c '^200$'); LOST=$(printf '%s\n' "$CODES" | grep -c '^409$')
+  ACCEPTED=0; for a in $L1 $L2 $L3; do [ "$(app_field "$a" status)" = accepted ] && ACCEPTED=$((ACCEPTED+1)); done
+  STATUS="200 x$WON, 409 x$LOST, acceptedCount $(field "$LIM" acceptedCount), applications accepted $ACCEPTED"
+  [ "$WON" = 1 ] && [ "$LOST" = 2 ] && [ "$(field "$LIM" acceptedCount)" = 1 ] && [ "$ACCEPTED" = 1 ] && ok=ok || ok=no
+  result T-ADM-46 "awards 1, 3 parallel accepts: one accepted, two 409, counter 1" $ok
+
+  # Rollback: 5 accepts of the SAME application at once, 5 awards free. Several can take an award (step 1) before
+  # one wins the status update (step 2); the losers must give theirs back, so the counter ends at 1, not more.
+  RB=$(published_scholarship 5)
+  RA=$(uuid); seed_app "$RA" "$RB" reviewed false
+  for i in 1 2 3 4 5; do
+    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+      -H 'Content-Type: application/json' --data "$ACC" "$API_URL$DEC/$RA/decision" > "$TMP/rb-$i" &
+  done
+  wait
+  CODES="$(cat "$TMP"/rb-* | tr -d '\r')"
+  WON=$(printf '%s\n' "$CODES" | grep -c '^200$'); LOST=$(printf '%s\n' "$CODES" | grep -c '^409$')
+  STATUS="200 x$WON, 409 x$LOST, acceptedCount $(field "$RB" acceptedCount)"
+  [ "$WON" = 1 ] && [ "$LOST" = 4 ] && [ "$(field "$RB" acceptedCount)" = 1 ] && ok=ok || ok=no
+  result T-ADM-47 "same application accepted 5 times at once: one 200, four 409, counter ends at 1" $ok
+
+  # Email failure (§6: never undoes the decision). Needs a server whose queue URL is wrong, so only on the local
+  # run: a second server on port 3099 with NOTIFICATIONS_QUEUE_URL pointing at a queue that doesn't exist
+  # (dotenv never overrides a variable that is already set, so this beats .env).
+  if [ $GATEWAY = no ]; then
+    EF=$(published_scholarship 2)
+    EA=$(uuid); seed_app "$EA" "$EF" reviewed false
+    take_messages # nothing from earlier tests left in the queue
+    ( cd "$ROOT/services/admin-service" && PORT=3099 \
+        NOTIFICATIONS_QUEUE_URL=http://localhost:4566/000000000000/queue-that-does-not-exist \
+        exec node src/server.js > /dev/null 2>&1 ) &
+    BAD_PID=$!
+    for _ in $(seq 1 30); do curl -s -o /dev/null http://localhost:3099/api/health && break; node -e "setTimeout(()=>{},300)"; done
+    SAVED_URL=$API_URL; API_URL=http://localhost:3099
+    call PATCH $DEC/$EA/decision test-admin "$ACC"
+    API_URL=$SAVED_URL
+    expect T-ADM-49 "accept while the queue can't be reached" 200 '"emailStatus":"failed"'
+    take_messages
+    STATUS="status $(app_field "$EA" status), emailStatus $(app_field "$EA" emailStatus), acceptedCount $(field "$EF" acceptedCount), queued messages for it: $(grep -c "$EA" "$TMP/messages")"
+    [ "$(app_field "$EA" status)" = accepted ] && [ "$(app_field "$EA" emailStatus)" = failed ] \
+      && [ "$(field "$EF" acceptedCount)" = 1 ] && ! grep -q "$EA" "$TMP/messages" && ok=ok || ok=no
+    result T-ADM-49 "decision kept: stored accepted with emailStatus failed, award still taken, nothing queued" $ok
+    kill "$BAD_PID" 2>/dev/null; wait "$BAD_PID" 2>/dev/null
+    for _ in 1 2 3 4 5; do curl -s -o /dev/null --max-time 1 http://localhost:3099/api/health || break; node -e "setTimeout(()=>{},300)"; done
+  else
+    skip T-ADM-49 "email-failure path" "needs a second server started with a wrong NOTIFICATIONS_QUEUE_URL; run on the local run only"
+  fi
+
+  # Clean up: seeded rows and the messages the decisions above queued.
+  take_messages
+  for a in "${SEEDED_APPS[@]}"; do
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Applications --key "{\"applicationId\":{\"S\":\"$a\"}}"
+  done
+  for a in "${SEEDED_REVIEWS[@]}"; do
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Reviews --key "{\"applicationId\":{\"S\":\"$a\"}}"
+  done
+  LEFT=0; for a in "${SEEDED_APPS[@]}"; do [ "$(app_field "$a" status)" = None ] || LEFT=$((LEFT+1)); done
+  STATUS="${#SEEDED_APPS[@]} applications seeded, $LEFT left"
+  [ "$LEFT" = 0 ] && ok=ok || ok=no
+  result T-ADM-48 "seeded applications and reviews deleted again" $ok
+else
+  skip T-ADM-39 "decision tests (39-48)" "need the AWS CLI to seed applications"
+fi
 
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"

@@ -259,3 +259,40 @@ or
 
 `status` other than `published` / `closed` (including `draft`) → `400`. The status change is one conditional update, so of several publishes sent at the same time exactly one succeeds and the rest get `409`.
 `400`, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`, `409`, `415`
+
+### PATCH /api/admin/applications/{id}/decision  [admin]  (accept or reject, then queue the email)
+```json
+{ "decision": "accepted" }
+```
+or
+```json
+{ "decision": "rejected" }
+```
+`200`
+```json
+{
+  "applicationId": "4123d54c-19de-4551-8f8b-5f88bf29438e",
+  "scholarshipId": "3586ae3a-2131-44c1-aaeb-eae0bff6fa44",
+  "status": "accepted",
+  "decidedBy": "test-admin",
+  "decidedAt": "2026-11-27T14:20:07.064Z",
+  "emailStatus": "queued"
+}
+```
+Rules (§6 Deciding):
+- Only a `reviewed` application can be decided. Not reviewed yet, or already `accepted`/`rejected` (a decision is final) → `409`.
+- A flagged application (`flagged = true`, set by review-service) can only be rejected → `409` on accept.
+- **Accept** is two conditional writes, no transaction: (1) Scholarships `acceptedCount + 1` only while `acceptedCount < awards` (limit reached → `409`), then (2) Applications `reviewed → accepted` only if still reviewed and not flagged. If (2) fails (someone decided it first) the award is given back (`acceptedCount - 1`, never below 0) and the answer is `409`. If even the give-back fails it is written to the log as an error with both ids.
+- **Reject** is one conditional write `reviewed → rejected`.
+- Fields this service changes on `Applications`: `status`, `decidedBy` (from the token), `decidedAt`, `emailStatus`. On `Scholarships`: `acceptedCount`.
+- Writes `decision` to `AuditLog` (detail `accepted` / `rejected`).
+
+Email (SQS `notifications`, consumed by `notification-sender`):
+- Message body, everything the sender needs so it never reads other tables. `flagReason` only for a flagged application, read from `Reviews`. Never the essay, scores, reviewer or flag note:
+```json
+{ "applicationId": "c110037b-0926-4254-9c47-7983b339a0f1", "studentEmail": "student1@example-university.edu", "scholarshipTitle": "Cloud Excellence Award", "decision": "rejected", "flagReason": "ineligible" }
+```
+- `emailStatus`: `pending` when the decision is written, `queued` once SQS accepted the message, `failed` if it didn't. A failed email never undoes the decision; the response is still `200` with `emailStatus: "failed"`, visible to the admin. Tested with a server whose queue URL is wrong (T-ADM-49): the decision and the award stay. `notification-sender` (step 8) sets what happens after the queue.
+- A message that fails 3 times in the sender moves to `notifications-dlq` (kept 14 days).
+
+`400` id not a UUID, `decision` not `accepted`/`rejected`, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` (not reviewed, already decided, flagged accept, awards limit reached, scholarship missing), `415`
