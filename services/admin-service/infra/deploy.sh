@@ -61,6 +61,25 @@ else
 fi
 # ---------- end of LOCAL TEST FIXTURE ----------------------------------------------------------------
 
+# ---------- 1d. LOCAL TEST FIXTURE: Users table -------------------------------------------------------
+# Users belongs to the shared auth-service (CLAUDE.md §1, §5); admin-service only manages accounts in it.
+# Created here ONLY so account management can be tested on Floci before auth-service's deploy.sh exists.
+# Same key and index as §5 (email-index projects everything: login will need passwordHash), only created if
+# missing, so auth-service's table wins once its script runs first.
+# REMOVE THIS WHOLE SECTION when services/auth-service/infra/deploy.sh creates the table.
+if ! aws dynamodb describe-table --table-name Users >/dev/null 2>&1; then
+  aws dynamodb create-table --table-name Users \
+    --attribute-definitions AttributeName=userId,AttributeType=S AttributeName=email,AttributeType=S \
+    --key-schema AttributeName=userId,KeyType=HASH \
+    --global-secondary-indexes '[{"IndexName":"email-index","KeySchema":[{"AttributeName":"email","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
+    --billing-mode PAY_PER_REQUEST >/dev/null
+  aws dynamodb wait table-exists --table-name Users
+  echo "created table Users (LOCAL TEST FIXTURE, owned by auth-service)"
+else
+  echo "table Users exists"
+fi
+# ---------- end of LOCAL TEST FIXTURE ----------------------------------------------------------------
+
 # ---------- 1c. SQS: notifications-dlq, then notifications with a redrive policy (§2, §6 Deciding) ----------
 # A decision email message that fails 3 times (notification-sender throws) moves to notifications-dlq instead of
 # being retried forever or lost. Visibility timeout 90 s = 6 × the sender's 15 s Lambda timeout (AWS guidance for
@@ -161,12 +180,15 @@ for key in \
   "POST /api/admin/scholarships" \
   "PUT /api/admin/scholarships/{id}" \
   "PATCH /api/admin/scholarships/{id}/status" \
-  "PATCH /api/admin/applications/{id}/decision"; do
+  "PATCH /api/admin/applications/{id}/decision" \
+  "GET /api/admin/users" \
+  "POST /api/admin/users" \
+  "PATCH /api/admin/users/{id}/status"; do
   ensure_route "$key"
 done
 # Every call with an Authorization header makes the browser send a preflight first (§2 CORS).
 for path in /api/health /api/admin/scholarships /api/admin/scholarships/{id} /api/admin/scholarships/{id}/status \
-  /api/admin/applications/{id}/decision; do
+  /api/admin/applications/{id}/decision /api/admin/users /api/admin/users/{id}/status; do
   ensure_route "OPTIONS $path"
 done
 

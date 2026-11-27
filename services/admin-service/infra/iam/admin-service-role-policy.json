@@ -31,7 +31,7 @@
     {
       "Sid": "UsersManageAccountsAndVerifyTokens",
       "Effect": "Allow",
-      "Action": ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:ConditionCheckItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Users",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Users/index/*"

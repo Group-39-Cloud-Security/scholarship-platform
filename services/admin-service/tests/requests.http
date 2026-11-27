@@ -432,3 +432,72 @@ Authorization: Bearer test-admin
 Content-Type: application/json
 
 { "decision": "accepted" }
+
+# ---------- /api/admin/users ----------
+@user = PASTE_USER_ID
+
+### T-ADM-50 no token: 401 (student or reviewer token: 403)
+GET {{baseUrl}}/api/admin/users
+
+### T-ADM-51 filters: only disabled reviewers (unknown role or status: 400)
+GET {{baseUrl}}/api/admin/users?role=reviewer&status=disabled
+Authorization: Bearer test-admin
+
+### T-ADM-52 all users: never a passwordHash or temporaryPassword field
+GET {{baseUrl}}/api/admin/users
+Authorization: Bearer test-admin
+
+### T-ADM-53 create a reviewer: 201 with temporaryPassword ONCE; role stays reviewer even though the body says admin
+POST {{baseUrl}}/api/admin/users
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "email": "new.reviewer@example.org", "name": "New Reviewer", "role": "admin" }
+
+### T-ADM-54 same email again: 409 (invalid email or no name: 400, text/plain: 415)
+POST {{baseUrl}}/api/admin/users
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "email": "NEW.REVIEWER@example.org", "name": "Same Email" }
+
+### T-ADM-55 the temp password and hash are in no AuditLog row and no log line: needs table scans and log search, only in tests/api-tests.sh
+
+### T-ADM-56 disable your own account: 409
+PATCH {{baseUrl}}/api/admin/users/test-admin/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "disabled" }
+
+### T-ADM-57 unknown user: 404 USER_NOT_FOUND (bad id or status: 400, already disabled: 409)
+PATCH {{baseUrl}}/api/admin/users/no-such-user/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "disabled" }
+
+### T-ADM-58 disable a student or reviewer: 200 (send "active" to enable again)
+PATCH {{baseUrl}}/api/admin/users/{{user}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "disabled" }
+
+### T-ADM-59 disable another admin while your own Users row is an active admin: 200
+PATCH {{baseUrl}}/api/admin/users/{{user}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "disabled" }
+
+### T-ADM-60 same, while your own Users row is disabled: 409 (at least one active admin must remain)
+PATCH {{baseUrl}}/api/admin/users/{{user}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "disabled" }
+
+### T-ADM-61 two admins disabling each other at once: parallel requests with the test-only second admin, only in tests/api-tests.sh
+
+### T-ADM-62 the test users are deleted again: only in tests/api-tests.sh

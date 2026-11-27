@@ -296,3 +296,49 @@ Email (SQS `notifications`, consumed by `notification-sender`):
 - A message that fails 3 times in the sender moves to `notifications-dlq` (kept 14 days).
 
 `400` id not a UUID, `decision` not `accepted`/`rejected`, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` (not reviewed, already decided, flagged accept, awards limit reached, scholarship missing), `415`
+
+### Users (account management)
+`Users` belongs to the shared auth-service (§1, §5); admin-service only manages accounts in it. On Floci the table is a local test fixture in admin-service's deploy.sh until auth-service creates it. `passwordHash` is never read back or returned: every read names its fields, and responses only ever contain `userId, email, name, role, status, mustChangePassword, createdAt`.
+
+### GET /api/admin/users?role=&status=  [admin]
+Both filters optional: `role` one of `student`, `reviewer`, `admin`; `status` one of `active`, `disabled` (anything else → `400`). Sorted by email.
+`200` (no match is `[]`)
+```json
+[
+  { "userId": "u-rev-1", "email": "reviewer@example-university.edu", "name": "Rana Reviewer", "role": "reviewer", "status": "disabled", "mustChangePassword": false, "createdAt": "2026-11-27T00:00:00.000Z" }
+]
+```
+`400`, `401`, `403`
+
+### POST /api/admin/users  [admin]  (create a reviewer)
+```json
+{ "email": "new.reviewer@example.org", "name": "New Reviewer" }
+```
+`201`. The **only** response that ever contains `temporaryPassword` (16 random URL-safe characters, 96 bits). Only its bcrypt hash is stored; the password itself is not stored, logged or audited. `role` is always `reviewer` (§6: admins come from seed.sh; a role in the body is ignored), `mustChangePassword` is `true`.
+```json
+{
+  "userId": "0b9d6c1e-3a52-4e7f-9d10-6a2f4c8b7e21",
+  "email": "new.reviewer@example.org",
+  "name": "New Reviewer",
+  "role": "reviewer",
+  "status": "active",
+  "mustChangePassword": true,
+  "createdAt": "2026-11-27T15:00:00.000Z",
+  "temporaryPassword": "q3Xv9LmP0aZt7KcW"
+}
+```
+Writes `user_created` to `AuditLog` (detail `reviewer created`, no email, no password). `400` invalid email (lowercased, at most 254 characters) or name (2-60 characters), bad JSON, `401`, `403`, `409` email already used, `415`.
+Email uniqueness is checked on `email-index` (a GSI, eventually consistent), so two creates for the same email at the very same moment could both pass. See `docs/decisions.md`.
+
+### PATCH /api/admin/users/{id}/status  [admin]  (disable or enable)
+```json
+{ "status": "disabled" }
+```
+`200` with the account (the 7 safe fields). Writes `user_disabled` or `user_enabled` to `AuditLog`.
+Rules (§6 Accounts):
+- Never your own account → `409`. Already in that status → `409`. Unknown id → `404 USER_NOT_FOUND`.
+- **Disabling an admin** is one `TransactWriteItems`: update the target `active → disabled` **and** a `ConditionCheck` that the acting admin's own row is `role = admin AND status = active`. Because you can't disable yourself, an active admin (you) always remains, so the last active admin can never be disabled. If two admins disable each other at the same time, DynamoDB runs one transaction after the other and the second one's check fails: exactly one `200`, one `409`, one admin left active.
+- Disabling a student or reviewer, and every enable, is one conditional update (`status` must still be what was read).
+- Phase A: the acting admin needs a row in `Users` for the admin rule (the tests seed `test-admin`); in Phase B `authenticate` re-reads `Users`, so every caller has one and a disabled user is blocked on the next request (§2).
+
+`400` id invalid or status not `active`/`disabled`, `401`, `403`, `404 USER_NOT_FOUND`, `409`, `415`

@@ -566,6 +566,206 @@ else
   skip T-ADM-39 "decision tests (39-48)" "need the AWS CLI to seed applications"
 fi
 
+# ---------- /api/admin/users: list, create reviewer, disable/enable (step 6) ----------
+# Users rows are seeded straight into DynamoDB (auth-service and seed.sh make them in real use) and deleted at the end.
+# Every seeded passwordHash contains a marker, so any response or log line that leaks a hash is easy to spot.
+U=/api/admin/users
+RUN_TAG=$(node -e 'process.stdout.write(require("crypto").randomBytes(4).toString("hex"))')
+HASH_MARKER="HASH-MARKER-$RUN_TAG"
+SEEDED_USERS=()
+seed_user() { # $1 userId, $2 role, $3 status
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Users --item \
+    "{\"userId\":{\"S\":\"$1\"},\"email\":{\"S\":\"$1-$RUN_TAG@example-university.edu\"},\"name\":{\"S\":\"Seeded $2\"},\"role\":{\"S\":\"$2\"},\"status\":{\"S\":\"$3\"},\"passwordHash\":{\"S\":\"$HASH_MARKER\"},\"mustChangePassword\":{\"BOOL\":false},\"createdAt\":{\"S\":\"2026-11-27T00:00:00.000Z\"}}"
+  SEEDED_USERS+=("$1")
+}
+user_field() { # $1 userId, $2 attribute
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb get-item --table-name Users \
+    --key "{\"userId\":{\"S\":\"$1\"}}" --query "Item.$2.[S,N,BOOL][?@ != null] | [0]" --output text | tr -d '\r'
+}
+set_user_status() { # $1 userId, $2 status (test setup only)
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb update-item --table-name Users --key "{\"userId\":{\"S\":\"$1\"}}" \
+    --update-expression 'SET #s = :s' --expression-attribute-names '{"#s":"status"}' --expression-attribute-values "{\":s\":{\"S\":\"$2\"}}"
+}
+no_secret_keys() { # the last response has no passwordHash/temporaryPassword key and no hash marker
+  ! has '"passwordHash"' && ! has '"temporaryPassword"' && ! has "$HASH_MARKER"
+}
+DISABLE='{"status":"disabled"}'; ENABLE='{"status":"active"}'
+
+if [ $HAVE_AWS = yes ]; then
+  STARTED_MS=$(node -e 'process.stdout.write(String(Date.now()))')
+  # Phase A: the acting test admin needs its own Users row for the admin rule (Phase B: every user has one).
+  seed_user test-admin admin active
+  S_STU="u-stu-$RUN_TAG"; S_REV="u-rev-$RUN_TAG"; S_ADM="u-adm-$RUN_TAG"
+  seed_user "$S_STU" student active
+  seed_user "$S_REV" reviewer disabled
+  seed_user "$S_ADM" admin active
+
+  call GET $U ""
+  expect T-ADM-50 "list users, no token" 401 UNAUTHENTICATED
+  call GET $U test-student-1
+  expect T-ADM-50 "list users, student token" 403 FORBIDDEN
+  call POST $U test-reviewer '{"email":"x@example-university.edu","name":"X"}'
+  expect T-ADM-50 "create reviewer, reviewer token" 403 FORBIDDEN
+  call PATCH $U/$S_STU/status "" "$DISABLE"
+  expect T-ADM-50 "change status, no token" 401 UNAUTHENTICATED
+
+  call GET "$U?role=reviewer&status=disabled" test-admin
+  expect T-ADM-51 "filter role=reviewer&status=disabled" 200 "\"userId\":\"$S_REV\""
+  node -e '
+const list = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.exit(Array.isArray(list) && list.length > 0 && list.every((u) => u.role === "reviewer" && u.status === "disabled") ? 0 : 1);' "$BODY" && ok=ok || ok=no
+  result T-ADM-51 "every user in the filtered list is a disabled reviewer" $ok
+  call GET "$U?role=bogus" test-admin
+  expect T-ADM-51 "unknown role filter" 400 "role must be one of"
+  call GET "$U?status=maybe" test-admin
+  expect T-ADM-51 "unknown status filter" 400 "status must be one of"
+
+  call GET $U test-admin
+  expect T-ADM-52 "list all users" 200 "\"userId\":\"$S_ADM\""
+  no_secret_keys && ok=ok || ok=no
+  result T-ADM-52 "list has no passwordHash/temporaryPassword key and no hash value" $ok
+  node -e '
+const list = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const allowed = ["userId","email","name","role","status","mustChangePassword","createdAt"];
+process.exit(list.every((u) => Object.keys(u).every((k) => allowed.includes(k))) ? 0 : 1);' "$BODY" && ok=ok || ok=no
+  result T-ADM-52 "every user object has only the 7 safe fields" $ok
+
+  NEW_EMAIL="Reviewer-$RUN_TAG@Example.org"
+  call POST $U test-admin "{\"email\":\"$NEW_EMAIL\",\"name\":\"New Reviewer\",\"role\":\"admin\",\"passwordHash\":\"chosen\",\"mustChangePassword\":false}"
+  expect T-ADM-53 "create reviewer" 201 '"role":"reviewer"'
+  NEW_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).userId||"")' "$BODY")
+  TEMP_PW=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).temporaryPassword||"")' "$BODY")
+  [ -n "$NEW_ID" ] && SEEDED_USERS+=("$NEW_ID")
+  node -e '
+const u = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.exit(u.role === "reviewer" && u.status === "active" && u.mustChangePassword === true && u.email === process.argv[2].toLowerCase()
+  && /^[A-Za-z0-9_-]{16}$/.test(u.temporaryPassword) && !("passwordHash" in u) ? 0 : 1);' "$BODY" "$NEW_EMAIL" && ok=ok || ok=no
+  result T-ADM-53 "role reviewer (body role ignored), active, mustChangePassword, email lowercased, 16-char temp password, no hash" $ok
+  STORED_HASH=$(user_field "$NEW_ID" passwordHash)
+  STATUS="stored hash starts '${STORED_HASH:0:7}', mustChangePassword $(user_field "$NEW_ID" mustChangePassword)"
+  node -e '
+const bcrypt = require(process.argv[1]);
+process.exit(process.argv[2] !== process.argv[3] && process.argv[2] !== "chosen" && bcrypt.compareSync(process.argv[3], process.argv[2]) ? 0 : 1);' \
+    "$(winpath "$ROOT/services/admin-service/node_modules/bcryptjs")" "$STORED_HASH" "$TEMP_PW" && ok=ok || ok=no
+  result T-ADM-53 "stored passwordHash is a bcrypt hash of the temp password (not the password, not the body value)" $ok
+
+  call POST $U test-admin "{\"email\":\"$NEW_EMAIL\",\"name\":\"Same Email\"}"
+  expect T-ADM-54 "same email again (any case)" 409 "already exists"
+  call POST $U test-admin '{"email":"not-an-email","name":"Bad Email"}'
+  expect T-ADM-54 "invalid email" 400 "valid email"
+  call POST $U test-admin '{"email":"ok@example-university.edu"}'
+  expect T-ADM-54 "no name" 400 "Name"
+  call POST $U test-admin '{"email":"ok@example-university.edu","name":"Ok"}' text/plain
+  expect T-ADM-54 "Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
+
+  # Secrets must not be in AuditLog: the user_created row, and no AuditLog row at all.
+  AUDIT_DUMP="$(winpath "$TMP/audit.json")"
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb scan --table-name AuditLog --output json > "$AUDIT_DUMP"
+  CREATED_ROWS=$(grep -c "\"$NEW_ID\"" "$AUDIT_DUMP")
+  STATUS="AuditLog rows naming the new user: $CREATED_ROWS; temp password found: $(grep -cF -- "$TEMP_PW" "$AUDIT_DUMP"); hash found: $(grep -cF -- "$STORED_HASH" "$AUDIT_DUMP")"
+  [ "$CREATED_ROWS" -ge 1 ] && ! grep -qF -- "$TEMP_PW" "$AUDIT_DUMP" && ! grep -qF -- "$STORED_HASH" "$AUDIT_DUMP" \
+    && ! grep -qF -- "$HASH_MARKER" "$AUDIT_DUMP" && ok=ok || ok=no
+  result T-ADM-55 "user_created is audited; no AuditLog row contains the temp password or any password hash" $ok
+
+  call PATCH $U/test-admin/status test-admin "$DISABLE"
+  expect T-ADM-56 "disable your own account" 409 "your own account"
+  STATUS="test-admin row status $(user_field test-admin status)"
+  [ "$(user_field test-admin status)" = active ] && ok=ok || ok=no
+  result T-ADM-56 "still active afterwards" $ok
+
+  call PATCH "$U/bad%20id/status" test-admin "$DISABLE"
+  expect T-ADM-57 "user id with a space" 400 "User id"
+  call PATCH $U/no-such-user-$RUN_TAG/status test-admin "$DISABLE"
+  expect T-ADM-57 "unknown user" 404 USER_NOT_FOUND
+  call PATCH $U/$S_STU/status test-admin '{"status":"banned"}'
+  expect T-ADM-57 "status banned" 400 "Status must be one of"
+  call PATCH $U/$S_REV/status test-admin "$DISABLE"
+  expect T-ADM-57 "disable an already disabled account" 409 "already disabled"
+
+  DIS_BEFORE=$(count_action user_disabled); EN_BEFORE=$(count_action user_enabled)
+  call PATCH $U/$S_STU/status test-admin "$DISABLE"
+  expect T-ADM-58 "disable a student" 200 '"status":"disabled"'
+  no_secret_keys && ok=ok || ok=no
+  result T-ADM-58 "status reply has no password fields" $ok
+  call PATCH $U/$S_STU/status test-admin "$ENABLE"
+  expect T-ADM-58 "enable the student again" 200 '"status":"active"'
+  STATUS="user_disabled $DIS_BEFORE -> $(count_action user_disabled), user_enabled $EN_BEFORE -> $(count_action user_enabled)"
+  [ "$(count_action user_disabled)" -eq $((DIS_BEFORE + 1)) ] && [ "$(count_action user_enabled)" -eq $((EN_BEFORE + 1)) ] && ok=ok || ok=no
+  result T-ADM-58 "exactly one user_disabled and one user_enabled row" $ok
+
+  call PATCH $U/$S_ADM/status test-admin "$DISABLE"
+  expect T-ADM-59 "an active admin disables another admin" 200 '"status":"disabled"'
+
+  set_user_status test-admin disabled   # the acting admin's own row says disabled (Phase B would block the token)
+  set_user_status "$S_ADM" active
+  call PATCH $U/$S_ADM/status test-admin "$DISABLE"
+  expect T-ADM-60 "disable an admin while your own account is not an active admin" 409 "at least one active admin"
+  STATUS="target status $(user_field "$S_ADM" status)"
+  [ "$(user_field "$S_ADM" status)" = active ] && ok=ok || ok=no
+  result T-ADM-60 "target admin still active (the transaction wrote nothing)" $ok
+  set_user_status test-admin active
+
+  if [ $GATEWAY = no ]; then
+    # A second local server that also accepts Bearer test-admin-2 (tests/second-admin.js), with its log kept.
+    SECOND_LOG="$TMP/second-server.log"
+    ( cd "$ROOT/services/admin-service" && PORT=3099 exec node -r ./tests/second-admin.js src/server.js > "$SECOND_LOG" 2>&1 ) &
+    SECOND_PID=$!
+    for _ in $(seq 1 30); do curl -s -o /dev/null http://localhost:3099/api/health && break; node -e "setTimeout(()=>{},300)"; done
+    seed_user test-admin-2 admin active
+    RACE_OK=0; RACE_DETAIL=""
+    for trial in 1 2 3 4 5; do
+      set_user_status test-admin active; set_user_status test-admin-2 active
+      curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Authorization: Bearer test-admin' -H 'Content-Type: application/json' \
+        --data "$DISABLE" "http://localhost:3099$U/test-admin-2/status" > "$TMP/race-a" &
+      curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Authorization: Bearer test-admin-2' -H 'Content-Type: application/json' \
+        --data "$DISABLE" "http://localhost:3099$U/test-admin/status" > "$TMP/race-b" &
+      wait $(jobs -p | grep -v "^$SECOND_PID$") 2>/dev/null
+      CA=$(cat "$TMP/race-a"); CB=$(cat "$TMP/race-b")
+      SA=$(user_field test-admin status); SB=$(user_field test-admin-2 status)
+      ACTIVE=0; [ "$SA" = active ] && ACTIVE=$((ACTIVE+1)); [ "$SB" = active ] && ACTIVE=$((ACTIVE+1))
+      RACE_DETAIL="$RACE_DETAIL [$trial: $CA/$CB, active $ACTIVE]"
+      { [ "$CA $CB" = "200 409" ] || [ "$CA $CB" = "409 200" ]; } && [ "$ACTIVE" = 1 ] && RACE_OK=$((RACE_OK+1))
+    done
+    STATUS="$RACE_DETAIL"
+    [ "$RACE_OK" = 5 ] && ok=ok || ok=no
+    result T-ADM-61 "two admins disable each other at once, 5 times: always one 200 + one 409 and one admin left active" $ok
+    set_user_status test-admin active
+
+    # One create through the second server, whose log we keep: the temp password and hash must not be in it.
+    curl -s -o "$BODY" -X POST -H 'Authorization: Bearer test-admin' -H 'Content-Type: application/json' \
+      --data "{\"email\":\"logcheck-$RUN_TAG@example.org\",\"name\":\"Log Check\"}" "http://localhost:3099$U"
+    LOG_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).userId||"")' "$BODY")
+    LOG_PW=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).temporaryPassword||"")' "$BODY")
+    [ -n "$LOG_ID" ] && SEEDED_USERS+=("$LOG_ID")
+    LOG_HASH=$(user_field "$LOG_ID" passwordHash)
+    kill "$SECOND_PID" 2>/dev/null; wait "$SECOND_PID" 2>/dev/null
+    STATUS="server log lines $(wc -l < "$SECOND_LOG" | tr -d ' '), temp password found $(grep -cF -- "$LOG_PW" "$SECOND_LOG"), hash found $(grep -cF -- "$LOG_HASH" "$SECOND_LOG")"
+    [ -n "$LOG_PW" ] && [ -n "$LOG_HASH" ] && [ "$(wc -l < "$SECOND_LOG")" -gt 0 ] && ! grep -qF -- "$LOG_PW" "$SECOND_LOG" \
+      && ! grep -qF -- "$LOG_HASH" "$SECOND_LOG" && ! grep -qF -- "$HASH_MARKER" "$SECOND_LOG" && ok=ok || ok=no
+    result T-ADM-55 "local server log: no temp password, no password hash" $ok
+  else
+    skip T-ADM-61 "two admins disabling each other at once" "needs the test-only second admin token (tests/second-admin.js), which only a local server loads; run on the local run"
+    # Through the gateway the log is CloudWatch: search everything admin-service logged during this run.
+    LOGS="$TMP/cloudwatch.txt"
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws logs filter-log-events --log-group-name /aws/lambda/admin-service \
+      --start-time "$STARTED_MS" --query 'events[].message' --output text > "$LOGS" 2>/dev/null
+    STATUS="CloudWatch lines this run $(tr '\t' '\n' < "$LOGS" | grep -c '"fn"'), temp password found $(grep -cF -- "$TEMP_PW" "$LOGS"), hash found $(grep -cF -- "$STORED_HASH" "$LOGS")"
+    [ "$(tr '\t' '\n' < "$LOGS" | grep -c '"fn"')" -gt 0 ] && ! grep -qF -- "$TEMP_PW" "$LOGS" && ! grep -qF -- "$STORED_HASH" "$LOGS" \
+      && ! grep -qF -- "$HASH_MARKER" "$LOGS" && ok=ok || ok=no
+    result T-ADM-55 "CloudWatch log: no temp password, no password hash" $ok
+  fi
+
+  for u in "${SEEDED_USERS[@]}"; do
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Users --key "{\"userId\":{\"S\":\"$u\"}}"
+  done
+  LEFT=0; for u in "${SEEDED_USERS[@]}"; do [ "$(user_field "$u" userId)" = None ] || LEFT=$((LEFT+1)); done
+  STATUS="${#SEEDED_USERS[@]} users seeded or created, $LEFT left"
+  [ "$LEFT" = 0 ] && ok=ok || ok=no
+  result T-ADM-62 "test users deleted again" $ok
+else
+  skip T-ADM-50 "user tests (50-62)" "need the AWS CLI to seed users"
+fi
+
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" = 0 ]
