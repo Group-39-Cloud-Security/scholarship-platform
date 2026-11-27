@@ -26,7 +26,7 @@ step() { echo; echo "=== $1"; }
 line() { echo "$1 | expected $2 | got $STATUS"; }
 
 echo "E2E run $(date -u +%Y-%m-%dT%H:%M:%SZ) against $API_URL"
-echo "main at $(git rev-parse --short HEAD)"
+echo "code at $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short HEAD)"
 
 step "0. health"
 call GET /api/health ""
@@ -87,8 +87,6 @@ step "6. notification"
 echo "waiting 20 s for notification-sender..."; sleep 20
 aws logs filter-log-events --log-group-name /aws/lambda/notification-sender --filter-pattern "\"$APP\"" \
   --query 'events[].message' --output text 2>&1 | tr '\t' '\n' | tail -5
-aws sqs get-queue-attributes --queue-url "$(aws sqs get-queue-url --queue-name notifications-dlq --query QueueUrl --output text 2>/dev/null)" \
-  --attribute-names ApproximateNumberOfMessages --query Attributes --output text 2>&1 | sed 's/^/notifications-dlq messages: /'
 call GET "/api/admin/audit-log?action=decision" test-admin
 grep -q "$APP" "$BODY" && echo "audit log has the decision for $APP" || echo "audit log has NO decision for $APP"
 
