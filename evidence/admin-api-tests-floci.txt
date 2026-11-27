@@ -1,7 +1,7 @@
 admin-service API tests
-Date:    2026-11-27T13:26:27Z
+Date:    2026-11-27T13:41:44Z
 Target:  http://b3d0f42414.execute-api.localhost.floci.io:4566 (API Gateway on Floci)
-Code:    c8c8c81
+Code:    a3960eb
 
 PASS T-ADM-01 health, no token (200)
 PASS T-ADM-01 health reports the right runtime (200)
@@ -14,7 +14,7 @@ PASS T-ADM-07 security headers (nosniff, DENY, CSP, no-store, no X-Powered-By) (
 PASS T-ADM-08 no token (401)
 PASS T-ADM-09 student token (403)
 PASS T-ADM-09 reviewer token (403)
-PASS T-ADM-09 both 403s written to AuditLog as forbidden with the full path (AuditLog 40 -> 42)
+PASS T-ADM-09 both 403s written to AuditLog as forbidden with the full path (AuditLog 48 -> 50)
 PASS T-ADM-10 Content-Type text/plain (415)
 PASS T-ADM-11 rubric weights sum to 90 (400)
 PASS T-ADM-12 rubric weight 4.5 (400)
@@ -37,7 +37,7 @@ PASS T-ADM-21 deadline 31 April (400)
 PASS T-ADM-23 zone offset +14:30 (above the 14:00 maximum) (400)
 PASS T-ADM-23 zone offset -00:00 (unknown local offset) (400)
 PASS T-ADM-24 29 February in 2027 (not a leap year) (400)
-PASS T-ADM-18 no item written by any of the 400s above (Scholarships 95 -> 95)
+PASS T-ADM-18 no item written by any of the 400s above (Scholarships 127 -> 127)
 PASS T-ADM-17 valid draft (201)
 PASS T-ADM-17 body values for status, acceptedCount, createdBy, id ignored; deadline UTC; eligibility cleaned (201)
 PASS T-ADM-22 draft with a past deadline is allowed (future only checked at publish) (201)
@@ -58,6 +58,7 @@ PASS T-ADM-28 PUT with weights summing to 90 (400)
 PASS T-ADM-28 invalid PUT changed nothing (stored title: Cloud Excellence Award)
 PASS T-ADM-29 PUT valid on a draft (200)
 PASS T-ADM-29 PUT replaced the fields, ignored status/acceptedCount/createdBy from the body (200)
+PASS T-ADM-29 exactly one scholarship_updated row added (AuditLog scholarship_updated 10 -> 11)
 PASS T-ADM-30 PATCH status {"status":"draft"} (400)
 PASS T-ADM-30 PATCH status {"status":"open"} (400)
 PASS T-ADM-30 PATCH status {} (400)
@@ -65,14 +66,19 @@ PASS T-ADM-31 close a draft (409)
 PASS T-ADM-32 publish a draft whose deadline has passed (409)
 PASS T-ADM-32 still a draft after the refused publish (stored status: draft)
 PASS T-ADM-33 publish a valid draft (200)
-PASS T-ADM-33 publish written to AuditLog (AuditLog scholarship_published 13 -> 14)
+PASS T-ADM-33 publish written to AuditLog (AuditLog scholarship_published 21 -> 22)
 PASS T-ADM-34 publish again (409)
 PASS T-ADM-35 PUT on a published scholarship (409)
 PASS T-ADM-35 published scholarship unchanged (stored title: Cloud Award 2027)
 PASS T-ADM-36 close a published scholarship (200)
+PASS T-ADM-36 exactly one scholarship_closed row added (AuditLog scholarship_closed 10 -> 11)
 PASS T-ADM-36 close it again (409)
 PASS T-ADM-36 publish a closed scholarship (409)
 PASS T-ADM-36 PUT on a closed scholarship (409)
 PASS T-ADM-37 5 parallel publishes: exactly one 200, four 409 (200 x1, 409 x4)
+PASS T-ADM-38 publish a stored draft with awards 0 (409)
+PASS T-ADM-38 publish a stored draft whose weights sum to 90 (409)
+PASS T-ADM-38 both still drafts, no publish written to AuditLog (status draft / draft, scholarship_published 23 -> 23)
+PASS T-ADM-38 test records deleted again (after cleanup: 'None' 'None')
 
-71 passed, 0 failed, 0 skipped
+77 passed, 0 failed, 0 skipped
