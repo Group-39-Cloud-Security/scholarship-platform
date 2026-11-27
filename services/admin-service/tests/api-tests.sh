@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # API tests for admin-service with curl (the T-ADM rows in docs/api-test-plan.md). Prints PASS/FAIL/SKIP per check.
-# Owner: Mohamed Wael. Run from the repo root after platform/shared.sh and the admin-service deploy:
+# Owner: Mohamed Wael. Run from the repo root after platform/shared.sh and the admin-service,
+# application-service and review-service deploys (those two create the Applications and Reviews tables):
 #   bash services/admin-service/tests/api-tests.sh                                   # through API Gateway on Floci
 #   API_URL=http://localhost:3000 bash services/admin-service/tests/api-tests.sh     # local server (still uses Floci's tables)
 #   For the local run start the server with  node src/server.js  (not npm run dev: node --watch can restart mid-run).
