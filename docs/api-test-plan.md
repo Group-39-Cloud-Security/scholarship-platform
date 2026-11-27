@@ -33,3 +33,15 @@
 | T-ADM-05 | admin-service | GET /api/health with Origin http://evil.example | no Access-Control-Allow-Origin header | no header | Pass | requests.http |
 | T-ADM-06 | admin-service | OPTIONS /api/health preflight from http://localhost:4566 | 204 with Access-Control-Allow-Methods/Headers | 204 | Pass | requests.http |
 | T-ADM-07 | admin-service | Any admin response | X-Content-Type-Options nosniff, X-Frame-Options DENY, CSP default-src 'none', Cache-Control no-store, no X-Powered-By | all present, no X-Powered-By | Pass | requests.http |
+| T-ADM-08 | admin-service | POST /api/admin/scholarships, no token | 401 UNAUTHENTICATED | 401 | Pass | requests.http |
+| T-ADM-09 | admin-service | POST /api/admin/scholarships as test-student-1 (and test-reviewer) | 403 FORBIDDEN + `forbidden` in AuditLog with the full path | 403, audit entry `/api/admin/scholarships` | Pass | requests.http |
+| T-ADM-10 | admin-service | POST /api/admin/scholarships with Content-Type text/plain | 415 UNSUPPORTED_MEDIA_TYPE | 415 | Pass | requests.http |
+| T-ADM-11 | admin-service | POST rubric weights 40/40/10 | 400 "Rubric weights must sum to 100 (they sum to 90)." | 400 | Pass | requests.http |
+| T-ADM-12 | admin-service | POST rubric weight 4.5, or "40" as a string | 400 must be a whole number | 400 | Pass | requests.http |
+| T-ADM-13 | admin-service | POST rubric with 1 or 7 criteria | 400 between 2 and 6 criteria | 400 | Pass | requests.http |
+| T-ADM-14 | admin-service | POST rubric with the same criterionId twice, or "Has Space" | 400 used twice / criterionId format | 400 | Pass | requests.http |
+| T-ADM-15 | admin-service | POST allowedDomains ["bue.edu.eg"] (not in ALLOWED_DOMAINS) | 400 not a partner university | 400 | Pass | requests.http |
+| T-ADM-16 | admin-service | POST minGpa 5 or "3", year 7, deadline "next friday", awards 0, no title | 400, one clear message each | 400 each | Pass | requests.http |
+| T-ADM-17 | admin-service | POST valid body that also sends status published, acceptedCount 99, createdBy hacker, scholarshipId | 201; stored status draft, acceptedCount 0, createdBy test-admin, server UUID, deadline in UTC | as expected | Pass | requests.http |
+| T-ADM-18 | admin-service | 20 invalid POSTs then count Scholarships items | only valid requests stored (nothing written on 4xx) | 2 items for 2 valid | Pass | requests.http |
+| T-ADM-19 | admin-service | GET /api/admin/scholarships (route not listed yet) | 404 {"message":"Not Found"} from API Gateway | 404 | Pass | requests.http |

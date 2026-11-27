@@ -8,6 +8,7 @@ const { requestLogger } = require('../shared/logger');
 const { securityHeaders, fixBody } = require('../shared/middleware');
 const { routeNotFound, errorHandler } = require('../shared/errors');
 const healthRoutes = require('./routes/health');
+const scholarshipRoutes = require('./routes/scholarships');
 
 const app = express();
 app.disable('x-powered-by'); // don't advertise Express
@@ -27,7 +28,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api/health', healthRoutes);
+app.use('/api/health', healthRoutes); // the only route without a token
+app.use('/api/admin/scholarships', scholarshipRoutes); // admin only (authenticate + requireRole in the router)
 
 app.use(routeNotFound);
 app.use(errorHandler);

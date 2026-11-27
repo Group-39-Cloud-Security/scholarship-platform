@@ -174,3 +174,56 @@ Proves API Gateway reaches the Lambda. Says nothing about tables, versions or se
 { "status": "ok", "environment": "production", "runtime": "lambda" }
 ```
 `200`. `runtime` is `local` under `npm run dev`. Every admin response also carries `Cache-Control: no-store`.
+
+### Data dictionary: `Scholarships`
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| scholarshipId | string (UUID) | Server | `crypto.randomUUID()`; a value in the body is ignored |
+| title | string | Client | trimmed, 3-100 characters |
+| description | string | Client | trimmed, 10-2000 characters |
+| deadline | ISO 8601 UTC | Client | a real date (`2027-01-15T23:59:00Z`); stored as `toISOString()` so `status-deadline-index` sorts correctly. Must be in the future to publish |
+| awards | int | Client | 1-1000; how many applications can be accepted |
+| acceptedCount | int | Server | starts at 0; atomic counter, never more than `awards` |
+| status | enum | Server | `draft` on create, then `published`, `closed` (PATCH status) |
+| rubric | list of `{ criterionId, name, description, weight }` | Client | 2-6 criteria; `criterionId` 2-30 lowercase letters, digits, `-` or `_`, starting with a letter, unique; name 2-60, description 2-300 characters; `weight` whole number 1-100; weights sum to exactly 100. review-service scores against it |
+| eligibility | `{ allowedDomains[], minGpa, years[] }` | Client | `allowedDomains`: 1-10, lowercased, each in the platform's `ALLOWED_DOMAINS`; `minGpa`: number 0-4; `years`: 1-6 whole numbers 1-6, de-duplicated and sorted |
+| createdBy | string | Server (token) | the admin's userId, never read from the body |
+| createdAt | ISO 8601 UTC | Server | |
+
+### POST /api/admin/scholarships  [admin]  (create a draft)
+```json
+{
+  "title": "Cloud Excellence Award",
+  "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z",
+  "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 40 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 40 },
+    { "criterionId": "need", "name": "Financial need", "description": "Evidence of need", "weight": 20 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+```
+`201`
+```json
+{
+  "scholarshipId": "8a48f941-640d-46cc-b921-78dae29152bc",
+  "title": "Cloud Excellence Award",
+  "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00.000Z",
+  "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 40 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 40 },
+    { "criterionId": "need", "name": "Financial need", "description": "Evidence of need", "weight": 20 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] },
+  "status": "draft",
+  "acceptedCount": 0,
+  "createdBy": "test-admin",
+  "createdAt": "2026-11-27T03:10:00.000Z"
+}
+```
+Writes `scholarship_created` to `AuditLog`. `400` invalid field (one clear message, e.g. "Rubric weights must sum to 100 (they sum to 90)."), bad JSON, `401`, `403` (also written to `AuditLog` as `forbidden`), `415`

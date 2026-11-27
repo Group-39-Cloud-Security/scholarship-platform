@@ -34,3 +34,88 @@ Access-Control-Request-Headers: authorization,content-type
 
 ### T-ADM-07 security headers on every response: nosniff, DENY, CSP default-src 'none', Cache-Control no-store, no X-Powered-By
 GET {{baseUrl}}/api/health
+
+# ---------- POST /api/admin/scholarships (create a draft) ----------
+
+### T-ADM-08 no token: 401 UNAUTHENTICATED
+POST {{baseUrl}}/api/admin/scholarships
+Content-Type: application/json
+
+{}
+
+### T-ADM-09 student token: 403 FORBIDDEN, and a "forbidden" row in AuditLog with targetId /api/admin/scholarships
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-student-1
+Content-Type: application/json
+
+{}
+
+### T-ADM-10 wrong Content-Type: 415 UNSUPPORTED_MEDIA_TYPE
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: text/plain
+
+hello
+
+### T-ADM-11 weights sum to 90: 400 "Rubric weights must sum to 100 (they sum to 90)."
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 40 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 40 },
+    { "criterionId": "need", "name": "Financial need", "description": "Evidence of need", "weight": 10 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-14 duplicate criterionId: 400 "Rubric criterionId "academic" is used twice."
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "academic", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-15 domain that is not a partner university: 400 not a partner university
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["bue.edu.eg"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-17 valid, with server-only fields in the body: 201 draft, acceptedCount 0, createdBy test-admin, new UUID (body values ignored)
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 40 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 40 },
+    { "criterionId": "need", "name": "Financial need", "description": "Evidence of need", "weight": 20 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] },
+  "status": "published", "acceptedCount": 99, "createdBy": "hacker", "scholarshipId": "chosen-by-client"
+}
