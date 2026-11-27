@@ -6,25 +6,58 @@ One section per service, written by its owner: data dictionary (Field · Type ·
 
 ## application-service
 
-Owner: Mohamed Khalil. All routes need `Authorization: Bearer <token>`. Errors use the shared shape `{ "error": { "code", "message" } }`.
+Owner: Mohamed Khalil. Lambda `application-service`. Every route needs `Authorization: Bearer <token>`; the allowed role is in brackets. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'`.
 
-### Data dictionary — Application (table `Applications`)
+| Route | Role | Success |
+|---|---|---|
+| `GET /api/scholarships?search=` | any logged-in user | 200 |
+| `GET /api/scholarships/{id}` | any logged-in user | 200 |
+| `POST /api/applications` | student | 201 |
+| `GET /api/applications/mine` | student | 200 |
+| `GET /api/applications/{id}/pdf` | student (owner) | 200 |
+| `DELETE /api/applications/{id}` | student (owner) | 204 |
+
+Errors every route can return: `401 UNAUTHENTICATED` (no, malformed or unknown token), `403 FORBIDDEN` (wrong role; also written to `AuditLog` as `forbidden`), `500 INTERNAL_ERROR` (unexpected; details only in the log). A path that is not listed above is answered by API Gateway with `404 {"message":"Not Found"}` and never reaches the Lambda (`404 ROUTE_NOT_FOUND` when run locally).
+
+### Data dictionary: `Applications` (one item per application)
+
 | Field | Type | Source | Rule |
 |---|---|---|---|
 | applicationId | string (UUID) | Server | `crypto.randomUUID()` |
-| studentId | string | Server | from the token, never the body |
-| studentEmail | string | Server | from the token (used for the decision email) |
-| scholarshipId | string | Client | must be a `published` scholarship before its deadline |
-| essay | string | Client | 200–1000 words, at most 10,000 characters |
-| gpa | number | Client | JSON number 0–4, ≥ the scholarship's `minGpa` |
-| yearOfStudy | integer | Client | 1–7, in the scholarship's `years` |
-| pdfBase64 | string (base64) | Client | request only, never stored: ≤ 2 MB decoded, content starts with `%PDF-` |
-| pdfKey | string | Server | `applications/<applicationId>.pdf` in S3 `scholarship-documents` |
-| status | string | Server | `submitted` on create; later `under_review` / `reviewed` / `accepted` / `rejected` (other services) |
+| studentId | string | Server (token) | never read from the body |
+| studentEmail | string | Server (token) | used by admin-service for the decision email |
+| scholarshipId | string | Client | 1–64 characters `A-Z a-z 0-9 -`; must be a `published` scholarship before its deadline |
+| essay | string | Client | 200–1000 words and at most 10,000 characters |
+| gpa | number | Client | JSON number 0–4 (a string such as `"3.5"` is rejected); ≥ the scholarship's `minGpa` |
+| yearOfStudy | integer | Client | whole number 1–6; in the scholarship's `years` |
+| pdfBase64 | string (base64) | Client | request only, never stored: valid base64, ≤ 2 MB decoded, content starts with `%PDF-` |
+| pdfKey | string | Server | `applications/<applicationId>.pdf` in the private bucket `scholarship-documents` (SSE-S3) |
+| status | enum | Server | see Status values |
 | submittedAt | string (ISO 8601 UTC) | Server | time of apply |
 
-### GET /api/scholarships?search=
-Any logged-in user. `published` only, earliest deadline first. `search` (≤ 100 chars) matches title or description.
+Any other field in the body (for example `studentId` or `status`) is ignored. Other services add `reviewerId`, `claimedAt`, `flagged`, `flagReason` (review-service) and `decidedAt` (admin-service); students never see `reviewerId`, scores or the flag.
+
+### Status values
+
+| Status | Set by | Meaning | Counts as active (max 3) | Student may withdraw |
+|---|---|---|---|---|
+| `submitted` | application-service (apply); review-service (release or 48 h expiry) | waiting for a reviewer | yes | yes, before the deadline |
+| `under_review` | review-service (claim) | a reviewer has it | yes | no |
+| `reviewed` | review-service (score or flag) | review done, waiting for a decision | yes | no |
+| `accepted` | admin-service (decision) | final | no | no |
+| `rejected` | admin-service (decision) | final | no | no |
+
+Withdrawing deletes the item and its PDF; there is no `withdrawn` status.
+
+### Business rules for applying
+
+- One application per scholarship per student, whatever its status (after a withdraw the student may apply again).
+- At most 3 active applications per student (`submitted`, `under_review`, `reviewed`).
+- Eligibility from the scholarship: the email domain **from the token** must be in `allowedDomains`, `gpa` ≥ `minGpa`, `yearOfStudy` in `years`. An empty rule means no restriction.
+- The scholarship must be `published` and its `deadline` in the future.
+
+### GET /api/scholarships?search=  [any logged-in user]
+Published scholarships only, earliest deadline first. `search` (optional, at most 100 characters, case-insensitive) matches the title or the description.
 ```json
 [
   {
@@ -34,18 +67,30 @@ Any logged-in user. `published` only, earliest deadline first. `search` (≤ 100
     "deadline": "2026-12-26T19:00:00.000Z",
     "awards": 2,
     "isOpen": true,
-    "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 0, "years": [1, 2, 3, 4] },
+    "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 0, "years": [1, 2, 3, 4, 5, 6] },
     "rubric": [{ "name": "Essay", "description": "Clarity and motivation", "weight": 40 }]
   }
 ]
 ```
-Errors: 400 (search given twice / too long), 401.
+`isOpen` is `false` once the deadline has passed (still listed, can't apply). `createdBy` and `acceptedCount` are never returned.
 
-### GET /api/scholarships/{id}
-200 = one object as above. 404 `SCHOLARSHIP_NOT_FOUND` for unknown, `draft` and `closed`. 401.
+| Status | Code | When |
+|---|---|---|
+| 200 | | list, `[]` when nothing matches |
+| 400 | `VALIDATION_ERROR` | `search` given twice or longer than 100 characters |
+| 401 | `UNAUTHENTICATED` | |
 
-### POST /api/applications
-Student only. Body:
+### GET /api/scholarships/{id}  [any logged-in user]
+One scholarship, same fields as above.
+
+| Status | Code | When |
+|---|---|---|
+| 200 | | published scholarship |
+| 404 | `SCHOLARSHIP_NOT_FOUND` | unknown or malformed id, or the scholarship is `draft` or `closed` |
+| 401 | `UNAUTHENTICATED` | |
+
+### POST /api/applications  [student]
+`Content-Type: application/json`, body up to 3 MB.
 ```json
 { "scholarshipId": "test-open", "essay": "…200 to 1000 words…", "gpa": 3.2, "yearOfStudy": 2, "pdfBase64": "JVBERi0xLjQK…" }
 ```
@@ -53,10 +98,19 @@ Student only. Body:
 ```json
 { "applicationId": "2a4a3a7c-a7bd-45e2-9735-5227a67fd3d5", "scholarshipId": "test-open", "status": "submitted", "submittedAt": "2026-11-26T19:58:31.870Z" }
 ```
-Errors: 400 `VALIDATION_ERROR` (bad JSON, missing/invalid field, not a PDF by content) · 401 · 403 (not a student) · 404 `SCHOLARSHIP_NOT_FOUND` (unknown or draft) · 409 `CONFLICT` (closed, deadline passed, not eligible with the reason, already applied, 3 active) · 413 `PAYLOAD_TOO_LARGE` (PDF > 2 MB) · 415.
+Checks run in this order; the first one that fails answers.
 
-### GET /api/applications/mine
-Student only. 200, newest first (`[]` when none). Never contains reviewer, scores, flag or essay.
+| Status | Code | When (message) |
+|---|---|---|
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` is not `application/json` |
+| 400 | `VALIDATION_ERROR` | body is not valid JSON or not a JSON object; `scholarshipId is required.`; essay missing, over 10,000 characters or outside 200–1000 words; `GPA must be a number.` / `between 0 and 4`; `Year of study must be a whole number.` / `Year of study must be between 1 and 6.`; `pdfBase64` missing or not valid base64; `The file must be a PDF (its content does not start with %PDF-).` |
+| 413 | `PAYLOAD_TOO_LARGE` | body over 3 MB, or `The PDF must be at most 2 MB.` |
+| 404 | `SCHOLARSHIP_NOT_FOUND` | unknown or `draft` scholarship |
+| 409 | `CONFLICT` | scholarship `closed`; deadline passed; not eligible (the message names the failed rule: email domain, minimum GPA or year); `You have already applied for this scholarship.`; `You already have 3 active applications. Wait for a decision or withdraw one first.` |
+| 401 / 403 | | not logged in / not a student |
+
+### GET /api/applications/mine  [student]
+The student's own applications, newest first (`[]` when none). Only the fields below are returned: never `reviewerId`, scores, the flag, the essay or the PDF key.
 ```json
 [
   {
@@ -78,18 +132,34 @@ Student only. 200, newest first (`[]` when none). Never contains reviewer, score
   }
 ]
 ```
-Errors: 401, 403.
+`decidedAt` is present only for `accepted` or `rejected`, and the last timeline step then reads `Decision: accepted` or `Decision: rejected`. `scholarshipTitle` is `(scholarship no longer available)` if the scholarship can't be found.
 
-### GET /api/applications/{id}/pdf
-Owner only. 200 (header `Cache-Control: no-store`):
+| Status | Code | When |
+|---|---|---|
+| 200 | | list |
+| 401 / 403 | | not logged in / not a student |
+
+### GET /api/applications/{id}/pdf  [student, owner only]
+The ownership check runs first, then a presigned GET link valid 300 seconds is returned with `Cache-Control: no-store`. The link is never logged.
 ```json
-{ "url": "http://…/scholarship-documents/applications/<id>.pdf?X-Amz-…", "expiresIn": 300 }
+{ "url": "http://…/scholarship-documents/applications/2a4a3a7c-….pdf?X-Amz-Algorithm=…", "expiresIn": 300 }
 ```
-Errors: 401, 403, 404 `APPLICATION_NOT_FOUND` (unknown id **or someone else's**).
 
-### DELETE /api/applications/{id}
-Owner only, withdraw. 204, no body. Deletes the item and its PDF.
-Errors: 401, 403, 404 `APPLICATION_NOT_FOUND`, 409 (not `submitted` any more, or deadline passed).
+| Status | Code | When |
+|---|---|---|
+| 200 | | own application |
+| 404 | `APPLICATION_NOT_FOUND` | unknown or malformed id, **or another student's application** (same answer, so ids can't be probed) |
+| 401 / 403 | | not logged in / not a student |
+
+### DELETE /api/applications/{id}  [student, owner only]  (withdraw)
+No body. Deletes the item (conditional: still this student's and still `submitted`) and then its PDF. The student may apply to that scholarship again.
+
+| Status | Code | When (message) |
+|---|---|---|
+| 204 | | withdrawn |
+| 404 | `APPLICATION_NOT_FOUND` | unknown or malformed id, or another student's application |
+| 409 | `CONFLICT` | `Only applications that a reviewer has not picked up yet can be withdrawn.`; `The deadline has passed, so this application can no longer be withdrawn.`; `A reviewer has just picked up this application, so it can no longer be withdrawn.` (claimed between the read and the delete) |
+| 401 / 403 | | not logged in / not a student |
 
 ## review-service
 
