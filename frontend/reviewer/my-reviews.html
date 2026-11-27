@@ -1,2 +1,45 @@
-<!-- reviewer/my-reviews.html — Owner: Mohamed Hazem. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- reviewer/my-reviews.html - Owner: Mohamed Hazem. My open claims (with time left) and my submitted reviews. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>My reviews | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="reviewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform - Reviewer</strong>
+    <nav id="nav" aria-label="Main">
+      <a href="queue.html">Queue</a>
+      <a href="my-reviews.html">My reviews</a>
+      <button type="button" id="logout" class="link">Log out</button>
+    </nav>
+  </header>
+  <main>
+    <h1>My reviews</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <h2>In progress</h2>
+    <p id="claims-empty" hidden>You have no claimed applications. Pick one from the <a href="queue.html">queue</a>.</p>
+    <table id="claims" hidden>
+      <thead><tr><th>Scholarship</th><th>Claimed</th><th>Time left</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Submitted</h2>
+    <p id="reviews-empty" hidden>You have not submitted any reviews yet.</p>
+    <table id="reviews" hidden>
+      <thead><tr><th>Scholarship</th><th>Result</th><th>Submitted</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="reviewer-common.js"></script>
+  <script src="my-reviews.js"></script>
+</body>
+</html>

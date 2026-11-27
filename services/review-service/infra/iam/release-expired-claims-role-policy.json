@@ -2,31 +2,25 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ApplicationsFindAndReleaseExpiredClaims",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:Query",
-        "dynamodb:UpdateItem"
-      ],
+      "Action": ["dynamodb:Query", "dynamodb:UpdateItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Applications",
-        "arn:aws:dynamodb:us-east-1:000000000000:table/Applications/index/*"
+        "arn:aws:dynamodb:us-east-1:000000000000:table/Applications/index/status-index"
       ]
     },
     {
+      "Sid": "AuditLogWriteOnly",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem"
-      ],
+      "Action": ["dynamodb:PutItem"],
       "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/AuditLog"
     },
     {
+      "Sid": "OwnLogGroupOnly",
       "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "*"
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:000000000000:log-group:/aws/lambda/release-expired-claims:*"
     }
   ]
 }
