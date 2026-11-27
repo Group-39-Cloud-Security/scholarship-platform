@@ -246,3 +246,117 @@ Content-Type: application/json
   ],
   "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
 }
+
+# ---------- PUT /api/admin/scholarships/{id} and PATCH .../status ----------
+# Create a draft first (T-ADM-17) and paste its scholarshipId here.
+@id = PASTE_SCHOLARSHIP_ID
+
+### T-ADM-25 no token: 401 (student or reviewer token: 403)
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Content-Type: application/json
+
+{ "status": "published" }
+
+### T-ADM-26 unknown id: 404 SCHOLARSHIP_NOT_FOUND (an id that is not a UUID: 400)
+PUT {{baseUrl}}/api/admin/scholarships/00000000-0000-4000-8000-000000000000
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{}
+
+### T-ADM-27 wrong Content-Type: 415
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: text/plain
+
+published
+
+### T-ADM-28 invalid edit (weights sum to 90): 400, the draft is unchanged
+PUT {{baseUrl}}/api/admin/scholarships/{{id}}
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Changed title", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 40 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-29 valid edit of a draft: 200, status/acceptedCount/createdBy from the body ignored
+PUT {{baseUrl}}/api/admin/scholarships/{{id}}
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Award 2027", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 3,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] },
+  "status": "published", "acceptedCount": 5, "createdBy": "hacker"
+}
+
+### T-ADM-30 status that is not published/closed: 400
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "draft" }
+
+### T-ADM-31 close a draft: 409
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "closed" }
+
+### T-ADM-32 publish a draft whose deadline has passed: 409 (use a draft made by T-ADM-22)
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "published" }
+
+### T-ADM-33 publish a valid draft: 200 published
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "published" }
+
+### T-ADM-34 publish it again: 409 Only a draft can be published
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "published" }
+
+### T-ADM-35 edit after publishing: 409 locked after publishing
+PUT {{baseUrl}}/api/admin/scholarships/{{id}}
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Edited after publish", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 3,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-36 close a published scholarship: 200 closed (again, or publish, or PUT afterwards: 409)
+PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{ "status": "closed" }
+
+### T-ADM-37 five publishes at the same time: exactly one 200 — needs parallel requests, so only in tests/api-tests.sh

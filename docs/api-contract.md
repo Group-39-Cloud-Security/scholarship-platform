@@ -230,7 +230,32 @@ Writes `scholarship_created` to `AuditLog`. `400` invalid field (one clear messa
 
 **Deadline rules across the life of a scholarship (§6):**
 - **Create and edit (draft):** the deadline only has to be a real date-time. A past deadline is accepted (`201`), so an admin can prepare a draft and fix the date later. No `409` on create.
-- **Publish** (`PATCH /api/admin/scholarships/{id}/status` with `published`, step 4, not built yet): `409 CONFLICT` if the deadline is not in the future at that moment, if `awards` < 1, or if the rubric is not valid. Checked by the server clock, inside the same conditional update that changes the status.
-- **After publish:** rubric, eligibility and deadline are locked. Editing (`PUT`) a `published` or `closed` scholarship is `409 CONFLICT` (step 4).
+- **Publish** (`PATCH /api/admin/scholarships/{id}/status` with `published`): `409 CONFLICT` if the deadline is not in the future at that moment, if `awards` < 1, or if the rubric is not valid. Checked by the server clock, and the deadline and awards are checked again inside the same conditional update that changes the status.
+- **After publish:** rubric, eligibility and deadline are locked. Editing (`PUT`) a `published` or `closed` scholarship is `409 CONFLICT`.
 
 **Years of study:** `years` accepts whole numbers 1-6. §6 doesn't set a numeric range; application-service must accept the same range for `yearOfStudy` (to confirm with Khalil, see `docs/decisions.md`).
+
+### PUT /api/admin/scholarships/{id}  [admin]  (edit a draft)
+Same body and the same rules as `POST`; it replaces every editable field (`title`, `description`, `deadline`, `awards`, `rubric`, `eligibility`). `status`, `acceptedCount`, `createdBy` and `createdAt` can't be changed here (body values are ignored). One conditional update: only while `status` is `draft`.
+
+`200` with the whole scholarship, as in the `POST` response. Writes `scholarship_updated` to `AuditLog`.
+`400` id is not a UUID, invalid field, bad JSON, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`, `409` not a draft any more ("Only a draft can be edited (this scholarship is published). Rubric, eligibility and deadline are locked after publishing."), `415`
+
+### PATCH /api/admin/scholarships/{id}/status  [admin]  (publish or close)
+```json
+{ "status": "published" }
+```
+or
+```json
+{ "status": "closed" }
+```
+`200` with the whole scholarship and its new `status`. Writes `scholarship_published` or `scholarship_closed` to `AuditLog`.
+
+| From | To | Allowed when | Otherwise |
+|---|---|---|---|
+| `draft` | `published` | deadline in the future (server clock), `awards` >= 1, rubric valid | `409` with the reason ("The deadline has passed. Set a future deadline before publishing.") |
+| `published` | `closed` | always (stops new applications; reviewing and deciding go on) | — |
+| any other pair | | never (`published` → `draft`, `draft` → `closed`, publishing or closing twice) | `409` |
+
+`status` other than `published` / `closed` (including `draft`) → `400`. The status change is one conditional update, so of several publishes sent at the same time exactly one succeeds and the rest get `409`.
+`400`, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`, `409`, `415`

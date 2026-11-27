@@ -114,11 +114,13 @@ ensure_route() {
 
 for key in \
   "GET /api/health" \
-  "POST /api/admin/scholarships"; do
+  "POST /api/admin/scholarships" \
+  "PUT /api/admin/scholarships/{id}" \
+  "PATCH /api/admin/scholarships/{id}/status"; do
   ensure_route "$key"
 done
 # Every call with an Authorization header makes the browser send a preflight first (§2 CORS).
-for path in /api/health /api/admin/scholarships; do
+for path in /api/health /api/admin/scholarships /api/admin/scholarships/{id} /api/admin/scholarships/{id}/status; do
   ensure_route "OPTIONS $path"
 done
 

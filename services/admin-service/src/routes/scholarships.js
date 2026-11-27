@@ -1,6 +1,6 @@
 // scholarships.js — method + path + role, nothing else (§9). Mounted at /api/admin/scholarships in app.js.
 // Owner: Mohamed Wael   ·   Rules: CLAUDE.md §8
-// Still to come: PUT /:id (draft only), PATCH /:id/status, GET /:id/applications
+// Still to come: GET /:id/applications
 
 const express = require('express');
 const { authenticate, requireRole } = require('../../shared/auth');
@@ -12,5 +12,7 @@ const router = express.Router();
 router.use(authenticate, requireRole('admin'));
 
 router.post('/', c.createScholarship);
+router.put('/:id', c.updateScholarship); // draft only
+router.patch('/:id/status', c.changeStatus); // draft → published → closed
 
 module.exports = router;

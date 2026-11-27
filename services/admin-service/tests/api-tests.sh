@@ -208,6 +208,122 @@ if [ $GATEWAY = yes ]; then
   expect T-ADM-19 "GET /api/admin/scholarships is not a route yet: stopped by API Gateway" 404 '"message":"Not Found"'
 else skip T-ADM-19 "route not listed in API Gateway" "only through API Gateway"; fi
 
+# ---------- PUT /api/admin/scholarships/{id} and PATCH .../status (step 4) ----------
+# new_draft [JS change]: creates a draft (optionally changed) and prints its id
+new_draft() {
+  call POST $S test-admin "$(with "${1:-b=>b}")"
+  node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scholarshipId||"")' "$BODY"
+}
+field() { # $1 id, $2 attribute: prints the stored value (S or N) straight from DynamoDB
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb get-item --table-name Scholarships \
+    --key "{\"scholarshipId\":{\"S\":\"$1\"}}" --query "Item.$2.[S,N][0]" --output text | tr -d '\r'
+}
+count_action() { # $1 action: number of AuditLog rows for it
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb query --table-name AuditLog \
+    --key-condition-expression '#a = :a' --expression-attribute-names '{"#a":"action"}' \
+    --expression-attribute-values "{\":a\":{\"S\":\"$1\"}}" --select COUNT --query Count --output text | tr -d '\r'
+}
+PUB='{"status":"published"}'
+CLOSE='{"status":"closed"}'
+UNKNOWN=00000000-0000-4000-8000-000000000000
+
+D=$(new_draft)
+call PUT $S/$D "" "$VALID"
+expect T-ADM-25 "PUT, no token" 401 UNAUTHENTICATED
+call PUT $S/$D test-student-1 "$VALID"
+expect T-ADM-25 "PUT, student token" 403 FORBIDDEN
+call PATCH $S/$D/status "" "$PUB"
+expect T-ADM-25 "PATCH status, no token" 401 UNAUTHENTICATED
+call PATCH $S/$D/status test-reviewer "$PUB"
+expect T-ADM-25 "PATCH status, reviewer token" 403 FORBIDDEN
+
+call PUT $S/not-a-uuid test-admin "$VALID"
+expect T-ADM-26 "PUT with an id that is not a UUID" 400 "Scholarship id"
+call PUT $S/$UNKNOWN test-admin "$VALID"
+expect T-ADM-26 "PUT unknown id" 404 SCHOLARSHIP_NOT_FOUND
+call PATCH $S/$UNKNOWN/status test-admin "$PUB"
+expect T-ADM-26 "PATCH status unknown id" 404 SCHOLARSHIP_NOT_FOUND
+
+call PUT $S/$D test-admin "$VALID" text/plain
+expect T-ADM-27 "PUT with Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
+call PATCH $S/$D/status test-admin "$PUB" text/plain
+expect T-ADM-27 "PATCH status with Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
+
+call PUT $S/$D test-admin "$(with 'b=>{b.title="Changed title";b.rubric[2].weight=10}')"
+expect T-ADM-28 "PUT with weights summing to 90" 400 "sum to 100"
+if [ $HAVE_AWS = yes ]; then
+  STATUS="stored title: $(field "$D" title)"
+  [ "$(field "$D" title)" = "Cloud Excellence Award" ] && ok=ok || ok=no
+  result T-ADM-28 "invalid PUT changed nothing" $ok
+else skip T-ADM-28 "invalid PUT changed nothing" "no AWS CLI"; fi
+
+call PUT $S/$D test-admin "$(with 'b=>Object.assign(b,{title:"Cloud Award 2027",awards:3,status:"published",acceptedCount:5,createdBy:"hacker"})')"
+expect T-ADM-29 "PUT valid on a draft" 200 '"title":"Cloud Award 2027"'
+node -e '
+const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.exit(s.status === "draft" && s.acceptedCount === 0 && s.createdBy === "test-admin" && s.awards === 3 ? 0 : 1);' "$BODY" && ok=ok || ok=no
+result T-ADM-29 "PUT replaced the fields, ignored status/acceptedCount/createdBy from the body" $ok
+
+for bad in '{"status":"draft"}' '{"status":"open"}' '{}'; do
+  call PATCH $S/$D/status test-admin "$bad"
+  expect T-ADM-30 "PATCH status $bad" 400 "Status must be one of"
+done
+
+call PATCH $S/$D/status test-admin "$CLOSE"
+expect T-ADM-31 "close a draft" 409 "Only a published scholarship can be closed"
+
+P=$(new_draft 'b=>b.deadline="2020-01-01T00:00:00Z"')
+call PATCH $S/$P/status test-admin "$PUB"
+expect T-ADM-32 "publish a draft whose deadline has passed" 409 "deadline has passed"
+if [ $HAVE_AWS = yes ]; then
+  STATUS="stored status: $(field "$P" status)"
+  [ "$(field "$P" status)" = draft ] && ok=ok || ok=no
+  result T-ADM-32 "still a draft after the refused publish" $ok
+else skip T-ADM-32 "still a draft" "no AWS CLI"; fi
+
+[ $HAVE_AWS = yes ] && PUBLISHED_BEFORE=$(count_action scholarship_published)
+call PATCH $S/$D/status test-admin "$PUB"
+expect T-ADM-33 "publish a valid draft" 200 '"status":"published"'
+if [ $HAVE_AWS = yes ]; then
+  STATUS="AuditLog scholarship_published $PUBLISHED_BEFORE -> $(count_action scholarship_published)"
+  [ "$(count_action scholarship_published)" -eq $((PUBLISHED_BEFORE + 1)) ] && ok=ok || ok=no
+  result T-ADM-33 "publish written to AuditLog" $ok
+else skip T-ADM-33 "publish written to AuditLog" "no AWS CLI"; fi
+
+call PATCH $S/$D/status test-admin "$PUB"
+expect T-ADM-34 "publish again" 409 "Only a draft can be published (this scholarship is published)"
+
+call PUT $S/$D test-admin "$(with 'b=>b.title="Edited after publish"')"
+expect T-ADM-35 "PUT on a published scholarship" 409 "locked after publishing"
+if [ $HAVE_AWS = yes ]; then
+  STATUS="stored title: $(field "$D" title)"
+  [ "$(field "$D" title)" = "Cloud Award 2027" ] && ok=ok || ok=no
+  result T-ADM-35 "published scholarship unchanged" $ok
+else skip T-ADM-35 "published scholarship unchanged" "no AWS CLI"; fi
+
+call PATCH $S/$D/status test-admin "$CLOSE"
+expect T-ADM-36 "close a published scholarship" 200 '"status":"closed"'
+call PATCH $S/$D/status test-admin "$CLOSE"
+expect T-ADM-36 "close it again" 409 "Only a published scholarship can be closed"
+call PATCH $S/$D/status test-admin "$PUB"
+expect T-ADM-36 "publish a closed scholarship" 409 "Only a draft can be published (this scholarship is closed)"
+call PUT $S/$D test-admin "$VALID"
+expect T-ADM-36 "PUT on a closed scholarship" 409 "locked after publishing"
+
+# Five publishes of the same draft at the same time: the conditional write lets exactly one win.
+# One output file per request: parallel appends to a single file can lose lines on Windows (Git Bash).
+R=$(new_draft)
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+    -H 'Content-Type: application/json' --data "$PUB" "$API_URL$S/$R/status" > "$TMP/race-$i" &
+done
+wait
+CODES="$(cat "$TMP"/race-* | tr -d '\r')"
+WON=$(printf '%s\n' "$CODES" | grep -c '^200$'); LOST=$(printf '%s\n' "$CODES" | grep -c '^409$')
+STATUS="200 x$WON, 409 x$LOST"
+[ "$WON" = 1 ] && [ "$LOST" = 4 ] && ok=ok || ok=no
+result T-ADM-37 "5 parallel publishes: exactly one 200, four 409" $ok
+
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" = 0 ]

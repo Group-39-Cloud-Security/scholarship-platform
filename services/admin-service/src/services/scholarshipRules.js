@@ -95,4 +95,4 @@ function validateScholarship(body, platformDomains) {
   };
 }
 
-module.exports = { validateScholarship };
+module.exports = { validateScholarship, checkRubric };
