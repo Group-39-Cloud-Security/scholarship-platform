@@ -532,3 +532,26 @@ Authorization: Bearer test-admin
 ### T-ADM-70 stats change by exactly the data added: needs seeded applications, only in tests/api-tests.sh
 
 ### T-ADM-71 the seeded applications are deleted again: only in tests/api-tests.sh
+
+# ---------- notification-sender (no HTTP route: SQS triggers it) ----------
+# Everything below needs the AWS CLI (lambda invoke, DynamoDB, SQS, CloudWatch), so it is only in tests/api-tests.sh.
+
+### T-ADM-72 what deploy.sh built (Lambda, SQS trigger with batch size 1, maxReceiveCount, role) — only in tests/api-tests.sh
+
+### T-ADM-73 invalid messages throw and write nothing — only in tests/api-tests.sh
+
+### T-ADM-74 a message for an email already sent or being sent is skipped — only in tests/api-tests.sh
+
+### T-ADM-75 a failed send before the last attempt goes back to queued — only in tests/api-tests.sh
+
+### T-ADM-76 a failed send on the last attempt marks failed and writes email_failed — only in tests/api-tests.sh
+
+### T-ADM-77 a real send through the Brevo sandbox (needs your key and sender in .env) — only in tests/api-tests.sh
+
+### T-ADM-78 two copies of one message: exactly one email — only in tests/api-tests.sh
+
+### T-ADM-79 no Brevo key in the sender log, no email address in email audit rows — only in tests/api-tests.sh
+
+### T-ADM-80 through SQS into the DLQ after maxReceiveCount failures (about 4.5 minutes) — only in tests/api-tests.sh
+
+### T-ADM-81 sender settings restored and test rows deleted — only in tests/api-tests.sh

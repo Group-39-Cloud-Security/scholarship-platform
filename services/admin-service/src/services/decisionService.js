@@ -84,15 +84,23 @@ async function decide(applicationId, decision, adminId, decidedAt) {
   }
 }
 
-// queued (the queue took the message) or failed (it didn't). Visible to the admin; notification-sender sets the rest.
+// pending → queued (the queue took the message) or pending → failed (it didn't). Only from pending: the sender
+// can pick the message up before this write lands, and its sending/sent must never be set back to queued.
+// Returns false when the sender already moved it on (that's fine, not an error).
 async function setEmailStatus(applicationId, emailStatus) {
-  await docClient.send(new UpdateCommand({
-    TableName: APPLICATIONS,
-    Key: { applicationId },
-    UpdateExpression: 'SET emailStatus = :e',
-    ConditionExpression: 'attribute_exists(applicationId)',
-    ExpressionAttributeValues: { ':e': emailStatus },
-  }));
+  try {
+    await docClient.send(new UpdateCommand({
+      TableName: APPLICATIONS,
+      Key: { applicationId },
+      UpdateExpression: 'SET emailStatus = :e',
+      ConditionExpression: 'emailStatus = :pending',
+      ExpressionAttributeValues: { ':e': emailStatus, ':pending': 'pending' },
+    }));
+    return true;
+  } catch (err) {
+    if (isConditionFail(err)) return false;
+    throw err;
+  }
 }
 
 module.exports = { getApplication, getFlagReason, reserveAward, releaseAward, decide, setEmailStatus };

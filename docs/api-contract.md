@@ -292,7 +292,7 @@ Email (SQS `notifications`, consumed by `notification-sender`):
 ```json
 { "applicationId": "c110037b-0926-4254-9c47-7983b339a0f1", "studentEmail": "student1@example-university.edu", "scholarshipTitle": "Cloud Excellence Award", "decision": "rejected", "flagReason": "ineligible" }
 ```
-- `emailStatus`: `pending` when the decision is written, `queued` once SQS accepted the message, `failed` if it didn't. A failed email never undoes the decision; the response is still `200` with `emailStatus: "failed"`, visible to the admin. Tested with a server whose queue URL is wrong (T-ADM-49): the decision and the award stay. `notification-sender` (step 8) sets what happens after the queue.
+- `emailStatus`: `pending` when the decision is written, then `queued` once SQS accepted the message or `failed` if it didn't (both only from `pending`, so they never overwrite what notification-sender already set). notification-sender then moves it `queued → sending → sent`, back to `queued` for a retry, or to `failed` on the last attempt. A failed email never undoes the decision; the response is still `200` with `emailStatus: "failed"`, visible to the admin. Tested with a server whose queue URL is wrong (T-ADM-49): the decision and the award stay. `notification-sender` (step 8) sets what happens after the queue.
 - A message that fails 3 times in the sender moves to `notifications-dlq` (kept 14 days).
 
 `400` id not a UUID, `decision` not `accepted`/`rejected`, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` (not reviewed, already decided, flagged accept, awards limit reached, scholarship missing), `415`
@@ -371,3 +371,13 @@ Counted live by DynamoDB on the status indexes (`status-deadline-index` on Schol
 }
 ```
 `401`, `403`
+
+### notification-sender  (Lambda, triggered by SQS `notifications`, no HTTP route)
+One message per invocation (batch size 1), the message format from the decision endpoint above.
+1. Checks the message: `applicationId` a UUID, `studentEmail` a valid address, `scholarshipTitle` 1-100 characters, `decision` `accepted`/`rejected`, `flagReason` one of the 4 reasons if present. An invalid message throws (retried, then kept in `notifications-dlq`) and writes nothing.
+2. **Claims** the email with one conditional update, `emailStatus` `pending`/`queued` → `sending`. If it is already `sending` or `sent`, this copy does nothing: a duplicated SQS message can never send a second email.
+3. Sends a **plain-text** email through Brevo (`POST https://api.brevo.com/v3/smtp/email`). The key comes from SSM `/scholarship/brevo-api-key` (SecureString, read once per cold start, never logged). With `BREVO_SANDBOX` not `false` the request carries `X-Sib-Sandbox: drop`: Brevo checks it but delivers nothing. A rejection includes the flag reason in plain words (§6: "the rejection email gives the flag reason"); never the essay, scores, reviewer or flag note.
+4. Success → `emailStatus = sent`, `email_sent` in `AuditLog` (detail = decision, no email address).
+5. Failure → if this is the queue's last attempt (`ApproximateReceiveCount` >= the queue's real `RedrivePolicy.maxReceiveCount`, read from SQS) `emailStatus = failed` and `email_failed` in `AuditLog`; otherwise back to `queued`. Then it throws, so SQS retries, and after the last attempt moves the message to `notifications-dlq` (kept 14 days).
+
+Environment (deploy.sh): `APPLICATIONS_TABLE`, `AUDIT_TABLE`, `BREVO_KEY_PARAM`, `NOTIFICATIONS_QUEUE_URL` (to read maxReceiveCount), `BREVO_SENDER_EMAIL` (a sender verified in Brevo), `BREVO_SANDBOX` (`true` unless set to `false`), `NODE_ENV`. The last two are new and still need adding to CLAUDE.md §4 (separate small PR).

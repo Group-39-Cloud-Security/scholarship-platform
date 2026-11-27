@@ -28,7 +28,24 @@ echo "Code:    $(git -C "$GIT_ROOT" rev-parse --short HEAD)$(git -C "$GIT_ROOT" 
 echo
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+SENDER_ENV_SWAPPED=no # set by the notification-sender tests; the trap puts the Lambda's settings back if the run dies
+restore_sender_env() { :; }
+# The SQS trigger hands every queued message to notification-sender at once. The decision tests read the queue
+# themselves, so the trigger is off while they run and back on for the sender tests (and on exit, whatever happens).
+TRIGGER_OFF=no
+set_trigger() { # enabled | disabled
+  local id
+  id=$(AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws lambda list-event-source-mappings --function-name notification-sender \
+    --query 'EventSourceMappings[0].UUID' --output text 2>/dev/null | tr -d '\r')
+  [ -n "$id" ] && [ "$id" != None ] || return 0
+  if [ "$1" = disabled ]; then
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws lambda update-event-source-mapping --uuid "$id" --no-enabled >/dev/null && TRIGGER_OFF=yes
+    node -e "setTimeout(()=>{},5000)" # let a receive that was already running finish
+  else
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws lambda update-event-source-mapping --uuid "$id" --enabled >/dev/null && TRIGGER_OFF=no
+  fi
+}
+trap 'restore_sender_env; [ "$TRIGGER_OFF" = yes ] && set_trigger enabled; rm -rf "$TMP"' EXIT
 BODY="$(winpath "$TMP/body")"
 HDRS="$(winpath "$TMP/headers")"
 PASS=0; FAIL=0; SKIP=0; STATUS=""
@@ -420,6 +437,7 @@ take_messages() { # reads every waiting message into $TMP/messages (one JSON bod
 message_for() { grep -F "\"applicationId\":\"$1\"" "$TMP/messages" | head -1; }
 
 if [ $HAVE_AWS = yes ]; then
+  set_trigger disabled # these tests read the queued messages themselves (see set_trigger)
   take_messages # start with an empty queue
   SCH=$(published_scholarship 2)
   A_OK=$(uuid); A_FLAG=$(uuid); A_SUB=$(uuid); A_UNDER=$(uuid)
@@ -880,6 +898,169 @@ process.stdout.write(JSON.stringify({ scholarships: d("scholarships"), applicati
   result T-ADM-71 "stats test applications deleted again" $ok
 else
   skip T-ADM-70 "stats change by exactly the seeded data" "need the AWS CLI to seed applications"
+fi
+
+# ---------- notification-sender (step 8): SQS → Brevo, emailStatus, DLQ ----------
+[ $HAVE_AWS = yes ] && { take_messages; set_trigger enabled; } # drain what earlier tests left, then the sender takes over
+# The sender is a Lambda on Floci in both runs (no HTTP route). Most tests invoke it directly with a crafted SQS
+# event. To make a send fail without touching the real Brevo key, the Lambda's BREVO_KEY_PARAM is pointed at a
+# parameter that doesn't exist for a moment, then the saved settings are put back.
+if [ $HAVE_AWS = yes ]; then
+  AWSF() { AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws "$@"; }
+  MAXRC=$(AWSF sqs get-queue-attributes --queue-url "$QURL" --attribute-names RedrivePolicy --query Attributes.RedrivePolicy --output text \
+    | tr -d '\r' | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(String(JSON.parse(d).maxReceiveCount)))')
+  SENDER_ENV_FILE="$(winpath "$TMP/sender-env.json")"
+  AWSF lambda get-function-configuration --function-name notification-sender --query Environment --output json > "$SENDER_ENV_FILE"
+  restore_sender_env() {
+    if [ "$SENDER_ENV_SWAPPED" = yes ]; then
+      AWSF lambda update-function-configuration --function-name notification-sender --environment "file://$SENDER_ENV_FILE" >/dev/null
+      AWSF lambda wait function-updated --function-name notification-sender 2>/dev/null
+      SENDER_ENV_SWAPPED=no
+    fi
+  }
+  break_key_param() {
+    node -e 'const f=require("fs");const e=JSON.parse(f.readFileSync(process.argv[1],"utf8"));e.Variables.BREVO_KEY_PARAM="/scholarship/test-key-that-does-not-exist";f.writeFileSync(process.argv[2],JSON.stringify(e))' \
+      "$SENDER_ENV_FILE" "$(winpath "$TMP/sender-env-broken.json")"
+    AWSF lambda update-function-configuration --function-name notification-sender --environment "file://$(winpath "$TMP/sender-env-broken.json")" >/dev/null
+    AWSF lambda wait function-updated --function-name notification-sender 2>/dev/null
+    SENDER_ENV_SWAPPED=yes
+  }
+  sqs_event() { # $1 file, $2 message body JSON, $3 receive count
+    node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ Records: [{ messageId: "test-" + Date.now(), body: process.argv[2], attributes: { ApproximateReceiveCount: process.argv[3] } }] }))' "$(winpath "$1")" "$2" "$3"
+  }
+  invoke_sender() { # $1 event file, $2 output file: STATUS = "error <type>" or "ok"
+    local fe
+    fe=$(AWSF lambda invoke --function-name notification-sender --payload "fileb://$(winpath "$1")" "$(winpath "$2")" --query FunctionError --output text 2>&1 | tr -d '\r' | tail -1)
+    if [ "$fe" = None ] || [ -z "$fe" ]; then STATUS=ok; else STATUS="error $(node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).errorType||"?")}catch{process.stdout.write("?")}' "$(winpath "$2")")"; fi
+  }
+  seed_email_app() { # $1 id, $2 emailStatus
+    AWSF dynamodb put-item --table-name Applications --item \
+      "{\"applicationId\":{\"S\":\"$1\"},\"studentId\":{\"S\":\"test-student-1\"},\"studentEmail\":{\"S\":\"student1@example-university.edu\"},\"scholarshipId\":{\"S\":\"email-test\"},\"status\":{\"S\":\"accepted\"},\"emailStatus\":{\"S\":\"$2\"},\"submittedAt\":{\"S\":\"2026-11-20T10:00:00.000Z\"}}"
+    SEEDED_APPS+=("$1")
+  }
+  email_msg() { printf '{"applicationId":"%s","studentEmail":"student1@example-university.edu","scholarshipTitle":"Cloud Excellence Award","decision":"%s"}' "$1" "${2:-accepted}"; }
+  emails_logged() { echo $(( $(count_action email_sent) + $(count_action email_failed) )); }
+
+  # T-ADM-72: what deploy.sh built
+  CONF=$(AWSF lambda get-function-configuration --function-name notification-sender --query '[Handler,Timeout,Role]' --output text | tr -d '\r')
+  MAP=$(AWSF lambda list-event-source-mappings --function-name notification-sender --query 'EventSourceMappings[0].[State,BatchSize,EventSourceArn]' --output text | tr -d '\r')
+  SIDS=$(AWSF iam get-role-policy --role-name notification-sender-role --policy-name notification-sender-role-policy --query 'PolicyDocument.Statement[].Sid' --output text | tr -d '\r')
+  STATUS="function [$CONF], trigger [$MAP], queue maxReceiveCount $MAXRC, policy Sids [$SIDS]"
+  echo "$CONF" | grep -q "^handler.handler	15	arn:aws:iam::000000000000:role/notification-sender-role$" \
+    && echo "$MAP" | grep -q "^Enabled	1	arn:aws:sqs:us-east-1:000000000000:notifications$" \
+    && [ "$MAXRC" = 3 ] && [ "$(echo $SIDS | wc -w)" = 5 ] && echo "$SIDS" | grep -q OwnLogGroupOnly && ok=ok || ok=no
+  result T-ADM-72 "sender Lambda (15 s), SQS trigger enabled with batch size 1, queue maxReceiveCount 3, role with 5 Sids" $ok
+
+  # T-ADM-73: messages that aren't valid are refused without writing anything
+  BEFORE=$(emails_logged)
+  BAD_OK=yes
+  for body in '{"applicationId":"not-a-uuid","studentEmail":"a@b.org","scholarshipTitle":"T","decision":"accepted"}' \
+              "{\"applicationId\":\"$(uuid)\",\"scholarshipTitle\":\"T\",\"decision\":\"accepted\"}" \
+              "{\"applicationId\":\"$(uuid)\",\"studentEmail\":\"a@b.org\",\"scholarshipTitle\":\"T\",\"decision\":\"maybe\"}" \
+              'not json at all'; do
+    sqs_event "$TMP/bad.json" "$body" 1; invoke_sender "$TMP/bad.json" "$TMP/bad-out.json"
+    [ "$STATUS" = "error Error" ] || BAD_OK=no
+  done
+  STATUS="last: $STATUS, email audit rows $BEFORE -> $(emails_logged)"
+  [ "$BAD_OK" = yes ] && [ "$(emails_logged)" = "$BEFORE" ] && ok=ok || ok=no
+  result T-ADM-73 "4 invalid messages: each throws (so SQS retries, then DLQ), nothing written" $ok
+
+  # T-ADM-74: an email already sent, or being sent by another copy, is never sent again
+  for st in sent sending; do
+    E=$(uuid); seed_email_app "$E" "$st"; BEFORE=$(emails_logged)
+    sqs_event "$TMP/dup.json" "$(email_msg "$E")" 1; invoke_sender "$TMP/dup.json" "$TMP/dup-out.json"
+    STATUS="$STATUS, emailStatus $(app_field "$E" emailStatus), email audit rows $BEFORE -> $(emails_logged)"
+    [ "${STATUS%%,*}" = ok ] && [ "$(app_field "$E" emailStatus)" = "$st" ] && [ "$(emails_logged)" = "$BEFORE" ] && ok=ok || ok=no
+    result T-ADM-74 "message for an email already '$st': skipped, no send, nothing written" $ok
+  done
+
+  # T-ADM-75/76: a failing send (no key) before and on the queue's last attempt (its real maxReceiveCount)
+  break_key_param
+  E=$(uuid); seed_email_app "$E" queued; BEFORE_F=$(count_action email_failed)
+  sqs_event "$TMP/f1.json" "$(email_msg "$E")" $((MAXRC - 1)); invoke_sender "$TMP/f1.json" "$TMP/f1-out.json"
+  STATUS="$STATUS, emailStatus $(app_field "$E" emailStatus), email_failed $BEFORE_F -> $(count_action email_failed)"
+  [ "${STATUS%%,*}" != ok ] && [ "$(app_field "$E" emailStatus)" = queued ] && [ "$(count_action email_failed)" = "$BEFORE_F" ] && ok=ok || ok=no
+  result T-ADM-75 "send fails on attempt $((MAXRC - 1)) of $MAXRC: throws, emailStatus back to queued, no email_failed" $ok
+  sqs_event "$TMP/f2.json" "$(email_msg "$E")" "$MAXRC"; invoke_sender "$TMP/f2.json" "$TMP/f2-out.json"
+  STATUS="$STATUS, emailStatus $(app_field "$E" emailStatus), email_failed $BEFORE_F -> $(count_action email_failed)"
+  [ "${STATUS%%,*}" != ok ] && [ "$(app_field "$E" emailStatus)" = failed ] && [ "$(count_action email_failed)" -eq $((BEFORE_F + 1)) ] && ok=ok || ok=no
+  result T-ADM-76 "send fails on attempt $MAXRC of $MAXRC (last): throws, emailStatus failed, exactly one email_failed" $ok
+
+  # T-ADM-80: the real path, through SQS: decision → queue → sender fails each time → after maxReceiveCount the
+  # message is in the DLQ and emailStatus is failed. Takes about maxReceiveCount × 90 s, so only on the API Gateway run.
+  if [ $GATEWAY = yes ]; then
+    DLQURL=$(AWSF sqs get-queue-url --queue-name notifications-dlq --query QueueUrl --output text | tr -d '\r')
+    dlq_count() { AWSF sqs get-queue-attributes --queue-url "$DLQURL" --attribute-names ApproximateNumberOfMessages --query Attributes.ApproximateNumberOfMessages --output text | tr -d '\r'; }
+    DLQ_BEFORE=$(dlq_count)
+    DS=$(published_scholarship 2); DA=$(uuid); seed_app "$DA" "$DS" reviewed false
+    call PATCH $DEC/$DA/decision test-admin "$ACC"
+    for _ in $(seq 1 30); do
+      [ "$(app_field "$DA" emailStatus)" = failed ] && [ "$(dlq_count)" -gt "$DLQ_BEFORE" ] && break
+      node -e "setTimeout(()=>{},15000)"
+    done
+    ATTEMPTS=$(AWSF logs filter-log-events --log-group-name /aws/lambda/notification-sender --query 'events[].message' --output text \
+      | tr '\t' '\n' | grep "$DA" | grep -o '"attempt":[0-9]*,"lastAttempt":[a-z]*' | tr '\n' ' ')
+    STATUS="emailStatus $(app_field "$DA" emailStatus), DLQ $DLQ_BEFORE -> $(dlq_count), sender log: $ATTEMPTS"
+    [ "$(app_field "$DA" emailStatus)" = failed ] && [ "$(dlq_count)" -eq $((DLQ_BEFORE + 1)) ] \
+      && echo "$ATTEMPTS" | grep -q "\"attempt\":$MAXRC,\"lastAttempt\":true" && ok=ok || ok=no
+    result T-ADM-80 "through SQS: $MAXRC failed attempts, then the message is in the DLQ and emailStatus is failed" $ok
+    # take that one message out of the DLQ again
+    for _ in 1 2 3; do
+      AWSF sqs receive-message --queue-url "$DLQURL" --max-number-of-messages 10 --output json | tr -d '\r' > "$TMP/dlq.json"
+      node -e 'for (const m of JSON.parse(require("fs").readFileSync(process.argv[1],"utf8") || "{}").Messages || []) if (m.Body.includes(process.argv[2])) console.log(m.ReceiptHandle)' "$(winpath "$TMP/dlq.json")" "$DA" > "$TMP/handles"
+      while read -r h; do AWSF sqs delete-message --queue-url "$DLQURL" --receipt-handle "$h"; done < "$TMP/handles"
+      [ -s "$TMP/handles" ] && break
+    done
+  else
+    skip T-ADM-80 "through SQS into the DLQ" "takes about 4.5 minutes and runs the same Floci Lambda; it runs on the API Gateway run"
+  fi
+  restore_sender_env
+
+  # T-ADM-77/78: real sends through Brevo's sandbox (Brevo checks each email, delivers nothing). Need your key in SSM
+  # (from .env through deploy.sh) and a verified sender address.
+  SENDER_ADDR=$(AWSF lambda get-function-configuration --function-name notification-sender --query Environment.Variables.BREVO_SENDER_EMAIL --output text | tr -d '\r')
+  SANDBOX=$(AWSF lambda get-function-configuration --function-name notification-sender --query Environment.Variables.BREVO_SANDBOX --output text | tr -d '\r')
+  if AWSF ssm get-parameter --name /scholarship/brevo-api-key >/dev/null 2>&1 && [ -n "$SENDER_ADDR" ] && [ "$SENDER_ADDR" != None ] && [ "$SANDBOX" = true ]; then
+    SENT_BEFORE=$(count_action email_sent)
+    RS=$(published_scholarship 2); RA=$(uuid); seed_app "$RA" "$RS" reviewed false
+    call PATCH $DEC/$RA/decision test-admin "$ACC"
+    for _ in $(seq 1 20); do [ "$(app_field "$RA" emailStatus)" = sent ] && break; node -e "setTimeout(()=>{},3000)"; done
+    STATUS="emailStatus $(app_field "$RA" emailStatus), email_sent $SENT_BEFORE -> $(count_action email_sent)"
+    [ "$(app_field "$RA" emailStatus)" = sent ] && [ "$(count_action email_sent)" -eq $((SENT_BEFORE + 1)) ] && ok=ok || ok=no
+    result T-ADM-77 "decision → SQS → sender → Brevo sandbox: emailStatus sent, one email_sent row" $ok
+    # Two copies of the same message at the same time: the conditional claim lets only one of them send.
+    E=$(uuid); seed_email_app "$E" queued; SENT_BEFORE=$(count_action email_sent)
+    sqs_event "$TMP/p.json" "$(email_msg "$E")" 1
+    invoke_sender "$TMP/p.json" "$TMP/p1.json" & invoke_sender "$TMP/p.json" "$TMP/p2.json" & wait
+    STATUS="emailStatus $(app_field "$E" emailStatus), email_sent $SENT_BEFORE -> $(count_action email_sent)"
+    [ "$(app_field "$E" emailStatus)" = sent ] && [ "$(count_action email_sent)" -eq $((SENT_BEFORE + 1)) ] && ok=ok || ok=no
+    result T-ADM-78 "2 copies of one message at the same time: exactly one email sent" $ok
+  else
+    skip T-ADM-77 "real send through the Brevo sandbox" "no Brevo key in SSM or no BREVO_SENDER_EMAIL (or sandbox off): set them in services/admin-service/.env and run deploy.sh"
+    skip T-ADM-78 "two copies of one message, one email" "same as T-ADM-77"
+  fi
+
+  # T-ADM-79: no Brevo key or key header in the sender's log, no email address in the email audit rows
+  AWSF logs filter-log-events --log-group-name /aws/lambda/notification-sender --start-time "$STARTED_MS" \
+    --query 'events[].message' --output text > "$TMP/sender-log.txt" 2>/dev/null
+  AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --expression-attribute-names '{"#a":"action"}' \
+    --expression-attribute-values '{":a":{"S":"email_failed"}}' --output json > "$TMP/email-audit.json"
+  AWSF dynamodb query --table-name AuditLog --key-condition-expression '#a = :a' --expression-attribute-names '{"#a":"action"}' \
+    --expression-attribute-values '{":a":{"S":"email_sent"}}' --output json >> "$TMP/email-audit.json"
+  STATUS="sender log lines $(tr '\t' '\n' < "$TMP/sender-log.txt" | grep -c '"fn"'), key-like text $(grep -ciE 'xkeysib-|api-key' "$TMP/sender-log.txt"), '@' in email audit rows $(grep -c '@' "$TMP/email-audit.json")"
+  [ "$(tr '\t' '\n' < "$TMP/sender-log.txt" | grep -c '"fn"')" -gt 0 ] && ! grep -qiE 'xkeysib-|api-key' "$TMP/sender-log.txt" \
+    && ! grep -q '@' "$TMP/email-audit.json" && ok=ok || ok=no
+  result T-ADM-79 "sender log has no Brevo key or api-key header; email audit rows have no email address" $ok
+
+  for a in "${SEEDED_APPS[@]}"; do AWSF dynamodb delete-item --table-name Applications --key "{\"applicationId\":{\"S\":\"$a\"}}"; done
+  take_messages
+  LEFT=0; for a in "${SEEDED_APPS[@]}"; do [ "$(app_field "$a" status)" = None ] || LEFT=$((LEFT+1)); done
+  KEYP=$(AWSF lambda get-function-configuration --function-name notification-sender --query Environment.Variables.BREVO_KEY_PARAM --output text | tr -d '\r')
+  STATUS="BREVO_KEY_PARAM $KEYP, test applications left $LEFT"
+  [ "$KEYP" = /scholarship/brevo-api-key ] && [ "$LEFT" = 0 ] && ok=ok || ok=no
+  result T-ADM-81 "sender settings restored after the failure tests, email test applications deleted" $ok
+else
+  skip T-ADM-72 "notification-sender tests (72-81)" "need the AWS CLI"
 fi
 
 echo

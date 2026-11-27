@@ -4,10 +4,9 @@
 # Owner: Mohamed Wael · Rules: CLAUDE.md §2 (who creates what), §4 (names), §7 (IAM), §8 (routes)
 # Safe to re-run: every step checks whether the thing already exists, and updates it if it does.
 #
-# Built step by step. Still to come:
-#   - SSM /scholarship/brevo-api-key from local .env,
-#     notification-sender role + Lambda + SQS event source mapping (step 8)
-#   - the admin routes from §8, added in the step that builds each one
+# Creates: Scholarships (+ local test fixtures Applications and Users), the notifications queues, the Brevo key in
+# SSM (from the local .env, never printed), admin-service and notification-sender with their roles, the SQS trigger
+# for notification-sender, and the admin routes from §8.
 set -e
 export AWS_PROFILE=floci MSYS_NO_PATHCONV=1 AWS_PAGER=""
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,7 +21,9 @@ REGION=us-east-1
 ACCOUNT=000000000000
 ALLOWED_DOMAINS="${ALLOWED_DOMAINS:-example-university.edu}"
 [ -n "$API_ID" ] && [ "$API_ID" != "None" ] || { echo "API scholarship-api not found: run platform/shared.sh first."; exit 1; }
-[ -f "$SERVICE_DIR/lambda.zip" ] || { echo "Missing lambda.zip: run npm install && npm run sync-shared && npm run zip first."; exit 1; }
+for z in lambda.zip notification-sender.zip; do
+  [ -f "$SERVICE_DIR/$z" ] || { echo "Missing $z: run npm install && npm run sync-shared && npm run zip first."; exit 1; }
+done
 
 # ---------- 1. Scholarships table (PK scholarshipId; GSI status-deadline-index: PK status, SK deadline) ----------
 # The index lets students list published scholarships by deadline without a Scan (§5).
@@ -102,6 +103,29 @@ DLQ_ARN=$(aws sqs get-queue-attributes --queue-url "$DLQ_URL" --attribute-names 
   --query Attributes.QueueArn --output text | tr -d '\r')
 QUEUE_ATTRS=$(printf '{"VisibilityTimeout":"90","RedrivePolicy":"{\\"deadLetterTargetArn\\":\\"%s\\",\\"maxReceiveCount\\":\\"3\\"}"}' "$DLQ_ARN")
 QUEUE_URL=$(ensure_queue notifications "$QUEUE_ATTRS")
+QUEUE_ARN=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names QueueArn \
+  --query Attributes.QueueArn --output text | tr -d '\r')
+
+# ---------- 1e. Brevo settings from the deployer's local .env (never committed, never printed) ----------
+env_value() { # $1 name: its value in services/admin-service/.env, or empty
+  if [ -f "$SERVICE_DIR/.env" ]; then grep -E "^$1=" "$SERVICE_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '\r'; fi
+}
+# The key goes to SSM as a SecureString through a temp file, so it is never on a command line or in the output.
+if [ -n "$(env_value BREVO_API_KEY)" ]; then
+  KEY_FILE="$(mktemp)"
+  trap 'rm -f "$KEY_FILE"' EXIT
+  BREVO_API_KEY="$(env_value BREVO_API_KEY)" node -e 'process.stdout.write(JSON.stringify({
+    Name: "/scholarship/brevo-api-key", Type: "SecureString", Overwrite: true, Value: process.env.BREVO_API_KEY }))' > "$KEY_FILE"
+  aws ssm put-parameter --cli-input-json "file://$(winpath "$KEY_FILE")" >/dev/null
+  rm -f "$KEY_FILE"
+  echo "SSM /scholarship/brevo-api-key set from the local .env (value not shown)"
+else
+  echo "WARNING: BREVO_API_KEY is empty in services/admin-service/.env, so /scholarship/brevo-api-key is not set and decision emails will fail."
+fi
+BREVO_SENDER_EMAIL="$(env_value BREVO_SENDER_EMAIL)"
+[ -n "$BREVO_SENDER_EMAIL" ] || echo "WARNING: BREVO_SENDER_EMAIL is empty in services/admin-service/.env (Brevo needs a verified sender)."
+BREVO_SANDBOX="$(env_value BREVO_SANDBOX)"
+[ "$BREVO_SANDBOX" = "false" ] || BREVO_SANDBOX=true # anything but an explicit false keeps the sandbox on
 
 # ---------- 2. IAM role (least privilege, policy in infra/iam/) ----------
 ensure_role() { # $1 = role name. Creates it if missing, then (re)writes its inline policy so edits apply.
@@ -114,6 +138,7 @@ ensure_role() { # $1 = role name. Creates it if missing, then (re)writes its inl
     --policy-document "file://$IAM_DIR/$1-policy.json"
 }
 ensure_role admin-service-role
+ensure_role notification-sender-role
 
 # ---------- 3. Lambda function ----------
 # $1 name, $2 handler, $3 zip file, $4 environment JSON
@@ -138,6 +163,23 @@ ADMIN_ENV=$(printf '{"Variables":{"NODE_ENV":"production","CORS_ORIGINS":"%s","A
 
 ensure_function admin-service src/lambda.handler lambda.zip "$ADMIN_ENV"
 ADMIN_ARN="arn:aws:lambda:$REGION:$ACCOUNT:function:admin-service"
+
+# notification-sender: only what it needs. The queue URL is for reading the queue's maxReceiveCount.
+SENDER_ENV=$(printf '{"Variables":{"NODE_ENV":"production","APPLICATIONS_TABLE":"Applications","AUDIT_TABLE":"AuditLog","BREVO_KEY_PARAM":"/scholarship/brevo-api-key","NOTIFICATIONS_QUEUE_URL":"%s","BREVO_SENDER_EMAIL":"%s","BREVO_SANDBOX":"%s"}}' "$QUEUE_URL" "$BREVO_SENDER_EMAIL" "$BREVO_SANDBOX")
+ensure_function notification-sender handler.handler notification-sender.zip "$SENDER_ENV"
+
+# ---------- 3b. SQS → notification-sender, one message per invocation ----------
+# BatchSize 1: a failing email only retries itself, and ApproximateReceiveCount is per message.
+MAPPING_ID=$(aws lambda list-event-source-mappings --function-name notification-sender --event-source-arn "$QUEUE_ARN" \
+  --query 'EventSourceMappings[0].UUID' --output text | tr -d '\r')
+if [ -z "$MAPPING_ID" ] || [ "$MAPPING_ID" = "None" ]; then
+  aws lambda create-event-source-mapping --function-name notification-sender --event-source-arn "$QUEUE_ARN" \
+    --batch-size 1 --enabled >/dev/null
+  echo "created SQS trigger notifications -> notification-sender (batch size 1)"
+else
+  aws lambda update-event-source-mapping --uuid "$MAPPING_ID" --batch-size 1 --enabled >/dev/null
+  echo "SQS trigger exists (batch size 1 re-applied)"
+fi
 
 # ---------- 4. API Gateway: one integration, exactly the §8 routes + an OPTIONS route per path ----------
 INTEGRATION_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" \

@@ -16,6 +16,7 @@ const ACTIONS = [
   'claim', 'claim_expired', 'release', 'review', 'pdf_download', // review-service and release-expired-claims
   'scholarship_created', 'scholarship_updated', 'scholarship_published', 'scholarship_closed', // admin-service
   'decision', 'user_created', 'user_disabled', 'user_enabled', // admin-service
+  'email_sent', 'email_failed', // notification-sender
 ];
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100; // hard cap per call
