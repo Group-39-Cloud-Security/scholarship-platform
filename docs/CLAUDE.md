@@ -125,7 +125,8 @@ Floci Dash is for looking only; everything is still created by scripts (rule 7).
 
 Lambda environment variables (set by infra scripts, never hard-coded; each function gets only what it needs):
 `USERS_TABLE`, `LOGIN_ATTEMPTS_TABLE`, `SCHOLARSHIPS_TABLE`, `APPLICATIONS_TABLE`, `REVIEWS_TABLE`, `AUDIT_TABLE`,
-`DOCUMENTS_BUCKET`, `NOTIFICATIONS_QUEUE_URL`, `JWT_SECRET_PARAM`, `BREVO_KEY_PARAM`, `ALLOWED_DOMAINS`, `CORS_ORIGINS`, `NODE_ENV`.
+`DOCUMENTS_BUCKET`, `NOTIFICATIONS_QUEUE_URL`, `JWT_SECRET_PARAM`, `BREVO_KEY_PARAM`, `BREVO_SENDER_EMAIL`, `BREVO_SANDBOX`, `ALLOWED_DOMAINS`, `CORS_ORIGINS`, `NODE_ENV`.
+`BREVO_SENDER_EMAIL` and `BREVO_SANDBOX` are only for `notification-sender`: the sender address must be verified in Brevo, and `BREVO_SANDBOX` (`true` unless set to `false`) makes Brevo check each email without delivering it, so tests on Floci never email the test students' made-up addresses. Both come from the deployer's local `.env` through `services/admin-service/infra/deploy.sh`.
 
 ---
 
@@ -390,7 +391,8 @@ events/     saved test events          tests/  Postman collection
 - [x] ~~TA: one backend repo per member + one frontend repo~~ → replaced by the TA email of 24 Nov: one team repo with a branch per member + one personal proof-of-work repo per member (section 9).
 - [ ] TA: personal repos public or private? (the email says both). Official deadline 25/11 with an unofficial extension: agree the real date and the Phase A end date.
 - [ ] Module rules on AI-assisted code; include an **AI usage declaration** in the report (not raised in our feedback, but Seif marked down groups 5 and 9 for missing one).
-- [ ] Floci checks in week 1: EventBridge Scheduler, CloudWatch metric filters/alarms, DynamoDB TTL, HTTP API throttling, Lambda outbound internet (Brevo, Pwned Passwords). (API Gateway HTTP API, S3 website, CORS via Express and `add-permission` are proven to work on Floci by the Lab 7 API Gateway + S3 lab.)
+- [ ] Floci checks in week 1: EventBridge Scheduler, CloudWatch metric filters/alarms, DynamoDB TTL, HTTP API throttling. (API Gateway HTTP API, S3 website, CORS via Express and `add-permission` are proven to work on Floci by the Lab 7 API Gateway + S3 lab.)
+- [x] Lambda outbound internet works on Floci (27 Nov): `notification-sender` reached `https://api.brevo.com` from inside Floci (Brevo answered 401 to a dummy key). Pwned Passwords from auth-service should work the same way, but is not tested yet.
 - [x] The "login lab" is Lab 8: random session token in a DynamoDB sessions table + Node's built-in `crypto.scrypt` with `timingSafeEqual`, no roles. Our JWT + re-reading `Users` on every request gives the same instant block of disabled users and adds roles, so we keep it (section 15).
 - [ ] Phase B, Wael's auth slice: keep `bcryptjs`, or switch to Node's built-in `crypto.scrypt` (Lab 8) and drop a dependency. Both are defensible; decide before writing login.
 - [ ] Optional, Phase B/C: one k6 load test (Lab 8) against `GET /api/scholarships` for the report's performance numbers (p95, failure rate).

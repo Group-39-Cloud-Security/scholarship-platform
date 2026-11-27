@@ -2,43 +2,38 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "NotificationsQueueConsume",
       "Effect": "Allow",
-      "Action": [
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:GetQueueAttributes"
-      ],
+      "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
       "Resource": "arn:aws:sqs:us-east-1:000000000000:notifications"
     },
     {
+      "Sid": "BrevoKeyRead",
       "Effect": "Allow",
-      "Action": [
-        "ssm:GetParameter"
-      ],
+      "Action": ["ssm:GetParameter"],
       "Resource": "arn:aws:ssm:us-east-1:000000000000:parameter/scholarship/brevo-api-key"
     },
     {
+      "Sid": "ApplicationsEmailStatusOnly",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:UpdateItem"
-      ],
-      "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/Applications"
+      "Action": ["dynamodb:UpdateItem"],
+      "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/Applications",
+      "Condition": {
+        "ForAllValues:StringEquals": { "dynamodb:Attributes": ["applicationId", "emailStatus"] },
+        "StringEqualsIfExists": { "dynamodb:ReturnValues": ["NONE"] }
+      }
     },
     {
+      "Sid": "AuditLogAppendOnly",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem"
-      ],
+      "Action": ["dynamodb:PutItem"],
       "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/AuditLog"
     },
     {
+      "Sid": "OwnLogGroupOnly",
       "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "*"
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:000000000000:log-group:/aws/lambda/notification-sender:*"
     }
   ]
 }
