@@ -21,7 +21,7 @@ const run = createTestRun([STUDENT]); // remembers every applicationId this run 
 const results = [];
 function check(id, name, ok, detail = '') {
   results.push({ id, ok });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(10)} ${name}${ok ? '' : `   <-- ${detail}`}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(10)} ${name}  (actual: ${detail})`);
 }
 
 async function apply(scholarshipId) {

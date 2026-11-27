@@ -24,6 +24,8 @@ tests/unit.test.js             pure rules (no AWS)
 tests/api-tests.js             43 end-to-end tests, PASS/FAIL per test ID
 tests/concurrency-tests.js     the apply limits under simultaneous requests (T-APP-44 to 48)
 tests/testRun.js               cleanup helper: removes only the applications a run created; skips if others exist
+tests/run-evidence.sh          runs both test files through API Gateway on Floci → evidence/application-api-tests-floci.txt
+scripts/fill-test-plan.js      fills Actual and Pass/Fail of the T-APP rows in docs/api-test-plan.md from that file
 ```
 
 ## Run (Git Bash, from this folder, Floci running, `platform/shared.sh` done once)

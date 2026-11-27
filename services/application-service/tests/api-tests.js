@@ -18,9 +18,17 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env
 const APPS = process.env.APPLICATIONS_TABLE || 'Applications';
 
 const results = [];
+let last = null; // the last API response, so every result line shows what actually came back (evidence)
+function describe(res) {
+  if (!res) return '';
+  const e = res.json?.error;
+  return `${res.status}${e?.code ? ` ${e.code}` : ''}${e?.message ? ` "${e.message}"` : ''}`;
+}
 function check(id, name, ok, detail = '') {
   results.push({ id, ok });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(10)} ${name}${ok ? '' : `   <-- ${detail}`}`);
+  const extra = detail !== '' && String(detail) !== String(last?.status) ? String(detail) : '';
+  const actual = [describe(last), extra].filter(Boolean).join('; ');
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(10)} ${name}  (actual: ${actual})`);
 }
 
 async function call(method, path, { token, body, raw, type = 'application/json' } = {}) {
@@ -34,6 +42,7 @@ async function call(method, path, { token, body, raw, type = 'application/json' 
   // Remember what this run created (and what it already withdrew), so cleanup touches nothing else.
   if (method === 'POST' && path === '/api/applications' && res.status === 201) run.track(json?.applicationId);
   if (method === 'DELETE' && res.status === 204) run.forget(path.split('/').pop());
+  last = { status: res.status, json };
   return { status: res.status, json, headers: res.headers };
 }
 
@@ -63,12 +72,13 @@ const run = createTestRun([S1, S2]);
     r = await call('GET', '/api/scholarships', { token: S1 });
     const ids = (r.json || []).map((s) => s.scholarshipId);
     check('T-APP-02', 'browse → 200, only published (no draft/closed)',
-      r.status === 200 && ids.includes('test-open') && !ids.includes('test-draft') && !ids.includes('test-closed'), `${r.status} ${ids}`);
+      r.status === 200 && ids.includes('test-open') && !ids.includes('test-draft') && !ids.includes('test-closed'), `listed: ${ids.join(',')}`);
     check('T-APP-03', 'list never shows createdBy/acceptedCount',
-      (r.json || []).every((s) => !('createdBy' in s) && !('acceptedCount' in s)));
+      (r.json || []).every((s) => !('createdBy' in s) && !('acceptedCount' in s)),
+      `${(r.json || []).length} scholarships; fields ${Object.keys((r.json || [])[0] || {}).join(',')}`);
 
     r = await call('GET', '/api/scholarships?search=merit', { token: S1 });
-    check('T-APP-04', 'search "merit" → only the matching one', r.status === 200 && r.json.length === 1 && r.json[0].scholarshipId === 'test-open', JSON.stringify(r.json));
+    check('T-APP-04', 'search "merit" → only the matching one', r.status === 200 && r.json.length === 1 && r.json[0].scholarshipId === 'test-open', `matched: ${(r.json || []).map((x) => x.scholarshipId).join(',') || 'none'}`);
 
     r = await call('GET', '/api/scholarships?search=a&search=b', { token: S1 });
     check('T-APP-05', 'search given twice → 400', r.status === 400, r.status);
@@ -127,7 +137,7 @@ const run = createTestRun([S1, S2]);
     // Extra fields that try to set server-owned values must be ignored.
     r = await call('POST', '/api/applications', { token: S1, body: { ...goodBody('test-open'), studentId: S2, status: 'accepted' } });
     const appId = r.json?.applicationId;
-    check('T-APP-22', 'valid application → 201 submitted', r.status === 201 && r.json.status === 'submitted' && !!appId, `${r.status} ${JSON.stringify(r.json)}`);
+    check('T-APP-22', 'valid application → 201 submitted', r.status === 201 && r.json.status === 'submitted' && !!appId, `status ${r.json?.status}, applicationId ${appId}`);
 
     r = await call('POST', '/api/applications', { token: S1, body: goodBody('test-open') });
     check('T-APP-23', 'second application to the same scholarship → 409', r.status === 409 && /already applied/.test(r.json?.error?.message), r.json?.error?.message);
@@ -136,8 +146,9 @@ const run = createTestRun([S1, S2]);
     r = await call('GET', '/api/applications/mine', { token: S1 });
     const mine = (r.json || []).find((a) => a.applicationId === appId);
     check('T-APP-24', 'mine → 200 with my application + timeline', r.status === 200 && !!mine && Array.isArray(mine.timeline) && mine.canWithdraw === true, r.status);
-    check('T-APP-25', 'body studentId/status were ignored (still mine, still submitted)', !!mine && mine.status === 'submitted');
-    check('T-APP-26', 'student view has no reviewerId/flag/essay', !!mine && !('reviewerId' in mine) && !('flagged' in mine) && !('essay' in mine));
+    check('T-APP-25', 'body studentId/status were ignored (still mine, still submitted)', !!mine && mine.status === 'submitted', `status ${mine?.status}`);
+    check('T-APP-26', 'student view has no reviewerId/flag/essay', !!mine && !('reviewerId' in mine) && !('flagged' in mine) && !('essay' in mine),
+      `fields ${Object.keys(mine || {}).join(',')}`);
 
     r = await call('GET', '/api/applications/mine', { token: S2 });
     check('T-APP-27', "student 2 doesn't see student 1's application", r.status === 200 && !r.json.some((a) => a.applicationId === appId), r.status);
@@ -153,7 +164,7 @@ const run = createTestRun([S1, S2]);
       const file = await fetch(r.json.url).catch(() => null);
       const bytes = file ? Buffer.from(await file.arrayBuffer()) : Buffer.alloc(0);
       check('T-APP-30', 'presigned URL downloads the same PDF', !!file && file.status === 200 && bytes.subarray(0, 5).toString() === '%PDF-',
-        file ? file.status : 'URL not reachable from this machine (see note on presigned URLs)');
+        file ? `download ${file.status}, file starts with ${JSON.stringify(bytes.subarray(0, 5).toString())}` : 'presigned URL not reachable from this machine');
     }
 
     r = await call('GET', `/api/applications/${appId}/pdf`, { token: S2 });
@@ -166,7 +177,7 @@ const run = createTestRun([S1, S2]);
     r = await call('POST', '/api/applications', { token: S1, body: goodBody('test-open-2') });
     const app2 = r.json?.applicationId;
     const r3 = await call('POST', '/api/applications', { token: S1, body: goodBody('test-open-3') });
-    check('T-APP-33', '2nd and 3rd active applications → 201', r.status === 201 && r3.status === 201, `${r.status} ${r3.status}`);
+    check('T-APP-33', '2nd and 3rd active applications → 201', r.status === 201 && r3.status === 201, `2nd ${r.status}, 3rd ${r3.status}`);
 
     r = await call('POST', '/api/applications', { token: S1, body: goodBody('test-open-4') });
     check('T-APP-34', '4th active application → 409 (max 3)', r.status === 409 && /3 active/.test(r.json?.error?.message), r.json?.error?.message);
@@ -187,7 +198,8 @@ const run = createTestRun([S1, S2]);
     r = await call('GET', '/api/applications/mine', { token: S1 });
     const claimed = (r.json || []).find((a) => a.applicationId === app2);
     check('T-APP-37', 'claimed application: timeline "Being reviewed", reviewer hidden',
-      !!claimed && claimed.status === 'under_review' && claimed.timeline[1].done === true && !('reviewerId' in claimed) && claimed.canWithdraw === false);
+      !!claimed && claimed.status === 'under_review' && claimed.timeline[1].done === true && !('reviewerId' in claimed) && claimed.canWithdraw === false,
+      `status ${claimed?.status}, being reviewed ${claimed?.timeline?.[1]?.done}, reviewerId shown ${!!claimed && 'reviewerId' in claimed}, canWithdraw ${claimed?.canWithdraw}`);
 
     r = await call('DELETE', `/api/applications/${appId}`, { token: S1 });
     check('T-APP-38', 'withdraw own submitted application → 204', r.status === 204, r.status);
@@ -204,7 +216,8 @@ const run = createTestRun([S1, S2]);
     // ---------- general security ----------
     r = await call('GET', '/api/scholarships', { token: S1 });
     check('T-APP-42', 'security headers on every response',
-      r.headers.get('x-content-type-options') === 'nosniff' && r.headers.get('x-frame-options') === 'DENY' && r.headers.get('content-security-policy') === "default-src 'none'");
+      r.headers.get('x-content-type-options') === 'nosniff' && r.headers.get('x-frame-options') === 'DENY' && r.headers.get('content-security-policy') === "default-src 'none'",
+      `nosniff=${r.headers.get('x-content-type-options')}, frame=${r.headers.get('x-frame-options')}, csp=${r.headers.get('content-security-policy')}`);
 
     r = await call('GET', '/api/applications', { token: S1 });
     check('T-APP-43', 'route that does not exist → 404', r.status === 404, r.status);
