@@ -2,92 +2,64 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ScholarshipsReadWrite",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:Query"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Scholarships",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Scholarships/index/*"
       ]
     },
     {
+      "Sid": "ApplicationsReadAndDecide",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:Query",
-        "dynamodb:UpdateItem",
-        "dynamodb:Scan"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:Scan"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Applications",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Applications/index/*"
       ]
     },
     {
+      "Sid": "ReviewsReadOnly",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:Query"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Reviews",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Reviews/index/*"
       ]
     },
     {
+      "Sid": "UsersManageAccountsAndVerifyTokens",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:ConditionCheckItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Users",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Users/index/*"
       ]
     },
     {
+      "Sid": "AuditLogAppendAndRead",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem",
-        "dynamodb:Query"
-      ],
+      "Action": ["dynamodb:PutItem", "dynamodb:Query"],
       "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/AuditLog"
     },
     {
+      "Sid": "NotificationsQueueSend",
       "Effect": "Allow",
-      "Action": [
-        "sqs:SendMessage"
-      ],
+      "Action": ["sqs:SendMessage"],
       "Resource": "arn:aws:sqs:us-east-1:000000000000:notifications"
     },
     {
+      "Sid": "JwtSecretRead",
       "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ssm:GetParameter"
-      ],
+      "Action": ["ssm:GetParameter"],
       "Resource": "arn:aws:ssm:us-east-1:000000000000:parameter/scholarship/jwt-secret"
     },
     {
+      "Sid": "OwnLogGroupOnly",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem"
-      ],
-      "Resource": "arn:aws:dynamodb:us-east-1:000000000000:table/Users"
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:us-east-1:000000000000:log-group:/aws/lambda/admin-service:*"
     }
   ]
 }
