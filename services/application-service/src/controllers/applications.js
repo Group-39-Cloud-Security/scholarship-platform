@@ -12,13 +12,15 @@ const { writeAudit } = require('../../shared/audit');
 const { log } = require('../../shared/logger');
 const { getScholarship } = require('../services/scholarshipReadService');
 const {
-  createApplication, getApplication, listByStudent, deleteIfSubmitted,
+  getApplication, listByStudent, createApplicationAtomic, withdrawAtomic,
 } = require('../services/applicationService');
 const {
   pdfKey, putPdf, deletePdf, presignPdf, PRESIGN_SECONDS,
 } = require('../services/documentService');
 const { decodePdf } = require('../services/pdfCheck');
-const { isDeadlinePassed, checkEligibility, checkApplicationLimits } = require('../services/eligibility');
+const {
+  isDeadlinePassed, checkEligibility, checkApplicationLimits, ALREADY_APPLIED_MESSAGE, LIMIT_MESSAGE,
+} = require('../services/eligibility');
 
 const ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 const YEAR_MIN = 1; // year of study: 1 to 6 (API contract)
@@ -97,18 +99,22 @@ async function apply(req, res, next) {
     const notEligible = checkEligibility({ email: req.user.email, gpa, yearOfStudy }, scholarship);
     if (notEligible) throw conflict(notEligible);
 
+    // Quick check with a clear message (also covers applications made before the lock rows existed).
+    // It is NOT what enforces the limits: two requests at the same moment both pass it. The transaction below does.
     const mine = await listByStudent(req.user.userId);
     const overLimit = checkApplicationLimits(mine, scholarshipId);
     if (overLimit) throw conflict(overLimit);
 
-    // 3. Save: PDF first, then the item. If the item fails, the PDF is removed again (no orphaned personal files).
+    // 3. Save: PDF first, then ONE transaction = the item + its one-per-scholarship lock + an active slot.
+    //    If the transaction doesn't go through, the PDF is removed again (no orphaned personal files).
     //    The server sets id, owner, status and time (§5) — none of them come from the client.
     const applicationId = crypto.randomUUID();
     const key = pdfKey(applicationId);
     const submittedAt = new Date().toISOString();
     await putPdf(key, pdfBytes);
+    let outcome;
     try {
-      await createApplication({
+      outcome = await createApplicationAtomic({
         applicationId,
         studentId: req.user.userId,
         studentEmail: req.user.email, // used later by admin-service for the decision email
@@ -123,6 +129,12 @@ async function apply(req, res, next) {
     } catch (err) {
       await deletePdf(key).catch(() => {});
       throw err;
+    }
+    if (!outcome.ok) {
+      await deletePdf(key).catch(() => {});
+      if (outcome.alreadyApplied) throw conflict(ALREADY_APPLIED_MESSAGE);
+      if (outcome.limitReached) throw conflict(LIMIT_MESSAGE);
+      throw conflict('Several applications arrived at the same moment. Please try again.');
     }
 
     res.locals.action = 'application_submitted';
@@ -164,7 +176,7 @@ async function downloadPdf(req, res, next) {
 }
 
 // ---------- DELETE /api/applications/{id} ----------
-// Only while "submitted" and before the deadline; deletes the item AND its PDF; the student may then apply again.
+// Only while "submitted" and before the deadline; deletes the item, its lock rows AND its PDF; the student may then apply again.
 async function withdraw(req, res, next) {
   try {
     const application = await loadOwnApplication(req.params.id, req.user.userId);
@@ -175,8 +187,9 @@ async function withdraw(req, res, next) {
     if (scholarship && isDeadlinePassed(scholarship.deadline)) {
       throw conflict('The deadline has passed, so this application can no longer be withdrawn.');
     }
-    // Conditional delete: if a reviewer claimed it a moment ago, DynamoDB refuses and we answer 409.
-    const deleted = await deleteIfSubmitted(application.applicationId, req.user.userId);
+    // One transaction: conditional delete + release of its lock rows. If a reviewer claimed it a moment ago,
+    // DynamoDB refuses all of it and we answer 409.
+    const deleted = await withdrawAtomic(application);
     if (!deleted) throw conflict('A reviewer has just picked up this application, so it can no longer be withdrawn.');
 
     try {

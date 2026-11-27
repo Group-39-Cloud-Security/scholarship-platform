@@ -4,6 +4,8 @@
 // Statuses that count towards the "max 3 active applications" rule (§6). accepted/rejected are final, so they don't count.
 const ACTIVE_STATUSES = ['submitted', 'under_review', 'reviewed'];
 const MAX_ACTIVE_APPLICATIONS = 3;
+const ALREADY_APPLIED_MESSAGE = 'You have already applied for this scholarship.';
+const LIMIT_MESSAGE = `You already have ${MAX_ACTIVE_APPLICATIONS} active applications. Wait for a decision or withdraw one first.`;
 
 // The part after the last "@", lower-cased: "Ali@Example-University.edu" → "example-university.edu".
 function emailDomain(email) {
@@ -47,16 +49,16 @@ function checkEligibility(student, scholarship) {
 // Returns null when the student may apply, otherwise the reason (409 CONFLICT).
 function checkApplicationLimits(mine, scholarshipId) {
   if (mine.some((a) => a.scholarshipId === scholarshipId)) {
-    return 'You have already applied for this scholarship.';
+    return ALREADY_APPLIED_MESSAGE;
   }
   const active = mine.filter((a) => ACTIVE_STATUSES.includes(a.status)).length;
   if (active >= MAX_ACTIVE_APPLICATIONS) {
-    return `You already have ${MAX_ACTIVE_APPLICATIONS} active applications. Wait for a decision or withdraw one first.`;
+    return LIMIT_MESSAGE;
   }
   return null;
 }
 
 module.exports = {
-  ACTIVE_STATUSES, MAX_ACTIVE_APPLICATIONS,
+  ACTIVE_STATUSES, MAX_ACTIVE_APPLICATIONS, ALREADY_APPLIED_MESSAGE, LIMIT_MESSAGE,
   emailDomain, isDeadlinePassed, checkEligibility, checkApplicationLimits,
 };

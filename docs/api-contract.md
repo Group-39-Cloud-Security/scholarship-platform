@@ -37,6 +37,19 @@ Errors every route can return: `401 UNAUTHENTICATED` (no, malformed or unknown t
 
 Any other field in the body (for example `studentId` or `status`) is ignored. Other services add `reviewerId`, `claimedAt`, `flagged`, `flagReason` (review-service) and `decidedAt` (admin-service); students never see `reviewerId`, scores or the flag.
 
+### Lock rows in `Applications` (application-service only)
+
+The apply limits are enforced by small lock rows written in the same DynamoDB transaction as the application. They have only these fields, so they never appear in `studentId-index`, `scholarshipId-index` or `status-index`. **A Scan of `Applications` must filter `attribute_exists(studentId)`.**
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| applicationId | string | Server | `lock#one#<studentId>#<scholarshipId>` (one per scholarship) or `lock#slot#<studentId>#<1-3>` (active slots). Contains `#`, so no route accepts it as an id |
+| lockType | enum | Server | `one-per-scholarship` or `active-slot` |
+| holder | string (UUID) | Server | the application holding the lock |
+| createdAt | string (ISO 8601 UTC) | Server | when the lock was taken |
+
+A slot is free again when its holder is `accepted`, `rejected` or no longer exists; the transaction checks this itself, so admin-service decisions free slots without touching lock rows. Withdraw releases both locks in the same transaction that deletes the application.
+
 ### Status values
 
 | Status | Set by | Meaning | Counts as active (max 3) | Student may withdraw |
@@ -55,6 +68,8 @@ Withdrawing deletes the item and its PDF; there is no `withdrawn` status.
 - At most 3 active applications per student (`submitted`, `under_review`, `reviewed`).
 - Eligibility from the scholarship: the email domain **from the token** must be in `allowedDomains`, `gpa` ≥ `minGpa`, `yearOfStudy` in `years`. An empty rule means no restriction.
 - The scholarship must be `published` and its `deadline` in the future.
+
+The first two limits are atomic: one `TransactWriteItems` writes the application, the one-per-scholarship lock and an active slot, each with a condition. Of two requests sent at the same moment that clash, exactly one gets 201 and the other gets 409.
 
 ### GET /api/scholarships?search=  [any logged-in user]
 Published scholarships only, earliest deadline first. `search` (optional, at most 100 characters, case-insensitive) matches the title or the description.
@@ -106,7 +121,7 @@ Checks run in this order; the first one that fails answers.
 | 400 | `VALIDATION_ERROR` | body is not valid JSON or not a JSON object; `scholarshipId is required.`; essay missing, over 10,000 characters or outside 200–1000 words; `GPA must be a number.` / `between 0 and 4`; `Year of study must be a whole number.` / `Year of study must be between 1 and 6.`; `pdfBase64` missing or not valid base64; `The file must be a PDF (its content does not start with %PDF-).` |
 | 413 | `PAYLOAD_TOO_LARGE` | body over 3 MB, or `The PDF must be at most 2 MB.` |
 | 404 | `SCHOLARSHIP_NOT_FOUND` | unknown or `draft` scholarship |
-| 409 | `CONFLICT` | scholarship `closed`; deadline passed; not eligible (the message names the failed rule: email domain, minimum GPA or year); `You have already applied for this scholarship.`; `You already have 3 active applications. Wait for a decision or withdraw one first.` |
+| 409 | `CONFLICT` | scholarship `closed`; deadline passed; not eligible (the message names the failed rule: email domain, minimum GPA or year); `You have already applied for this scholarship.`; `You already have 3 active applications. Wait for a decision or withdraw one first.`; `Several applications arrived at the same moment. Please try again.` (still clashing after 3 attempts) |
 | 401 / 403 | | not logged in / not a student |
 
 ### GET /api/applications/mine  [student]
@@ -152,7 +167,7 @@ The ownership check runs first, then a presigned GET link valid 300 seconds is r
 | 401 / 403 | | not logged in / not a student |
 
 ### DELETE /api/applications/{id}  [student, owner only]  (withdraw)
-No body. Deletes the item (conditional: still this student's and still `submitted`) and then its PDF. The student may apply to that scholarship again.
+No body. One transaction deletes the item (conditional: still this student's and still `submitted`) and releases its two lock rows; then the PDF is deleted. The student may apply to that scholarship again.
 
 | Status | Code | When (message) |
 |---|---|---|

@@ -45,6 +45,11 @@
 | T-APP-41 | application-service | re-apply while 3 active | 409 | | | tests/api-tests.js |
 | T-APP-42 | application-service | any response | nosniff, DENY, CSP default-src 'none' | | | tests/api-tests.js |
 | T-APP-43 | application-service | GET /api/applications (no such route) | 404 | | | tests/api-tests.js |
+| T-APP-44 | application-service | 2 simultaneous POST /api/applications, same scholarship | exactly one 201, the other 409 already applied | | | tests/concurrency-tests.js |
+| T-APP-45 | application-service | same | only one application stored for that scholarship | | | tests/concurrency-tests.js |
+| T-APP-46 | application-service | 2 active, then 2 simultaneous POST, different scholarships | exactly one 201, the other 409 (3 active) | | | tests/concurrency-tests.js |
+| T-APP-47 | application-service | same | never more than 3 active stored | | | tests/concurrency-tests.js |
+| T-APP-48 | application-service | withdraw, then apply again to that scholarship | 204 then 201 (locks released) | | | tests/concurrency-tests.js |
 | T-REV-01 | review-service | GET /api/reviews/queue, no token | 401 UNAUTHENTICATED |  |  |  |
 | T-REV-02 | review-service | GET /api/reviews/queue as test-student-1 | 403 FORBIDDEN + `forbidden` in AuditLog |  |  |  |
 | T-REV-03 | review-service | GET /api/reviews/queue as test-reviewer | 200, submitted only, oldest first, at most 50, no essay/email |  |  |  |

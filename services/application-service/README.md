@@ -6,7 +6,7 @@ Owner: **Mohamed Khalil** · Group 39 Scholarship Platform · Rules: `docs/CLAUD
 | Endpoint | Who | Business rules |
 |---|---|---|
 | `GET /api/scholarships?search=` · `GET /api/scholarships/{id}` | any logged-in user | only `published` shown; drafts/closed → 404 |
-| `POST /api/applications` | student | published + before deadline · eligibility (email domain from the token, min GPA, year) · one per scholarship · max 3 active · essay 200–1000 words (≤ 10,000 chars) · PDF ≤ 2 MB starting with `%PDF-` |
+| `POST /api/applications` | student | published + before deadline · eligibility (email domain from the token, min GPA, year) · one per scholarship · max 3 active (atomic: one DynamoDB transaction with lock rows) · essay 200–1000 words (≤ 10,000 chars) · PDF ≤ 2 MB starting with `%PDF-` |
 | `GET /api/applications/mine` | student | own only; status timeline; never reviewer, scores or flag |
 | `GET /api/applications/{id}/pdf` | student (owner) | ownership first, then a 5-minute presigned link |
 | `DELETE /api/applications/{id}` | student (owner) | only while `submitted` and before the deadline (conditional delete); removes the PDF too |
@@ -22,6 +22,7 @@ infra/deploy.sh    table, bucket, IAM role, Lambda, integration, routes + OPTION
 scripts/test-scholarships.js   Phase A test data only (8 scholarships with ids test-*)
 tests/unit.test.js             pure rules (no AWS)
 tests/api-tests.js             43 end-to-end tests, PASS/FAIL per test ID
+tests/concurrency-tests.js     the apply limits under simultaneous requests (T-APP-44 to 48)
 ```
 
 ## Run (Git Bash, from this folder, Floci running, `platform/shared.sh` done once)

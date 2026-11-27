@@ -2,9 +2,9 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ApplicationsReadWriteDelete",
+      "Sid": "ApplicationsAndLockRowsReadWriteDelete",
       "Effect": "Allow",
-      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query"],
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:ConditionCheckItem"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:000000000000:table/Applications",
         "arn:aws:dynamodb:us-east-1:000000000000:table/Applications/index/*"
