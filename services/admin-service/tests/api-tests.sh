@@ -257,12 +257,18 @@ if [ $HAVE_AWS = yes ]; then
   result T-ADM-28 "invalid PUT changed nothing" $ok
 else skip T-ADM-28 "invalid PUT changed nothing" "no AWS CLI"; fi
 
+[ $HAVE_AWS = yes ] && UPDATED_BEFORE=$(count_action scholarship_updated)
 call PUT $S/$D test-admin "$(with 'b=>Object.assign(b,{title:"Cloud Award 2027",awards:3,status:"published",acceptedCount:5,createdBy:"hacker"})')"
 expect T-ADM-29 "PUT valid on a draft" 200 '"title":"Cloud Award 2027"'
 node -e '
 const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 process.exit(s.status === "draft" && s.acceptedCount === 0 && s.createdBy === "test-admin" && s.awards === 3 ? 0 : 1);' "$BODY" && ok=ok || ok=no
 result T-ADM-29 "PUT replaced the fields, ignored status/acceptedCount/createdBy from the body" $ok
+if [ $HAVE_AWS = yes ]; then
+  STATUS="AuditLog scholarship_updated $UPDATED_BEFORE -> $(count_action scholarship_updated)"
+  [ "$(count_action scholarship_updated)" -eq $((UPDATED_BEFORE + 1)) ] && ok=ok || ok=no
+  result T-ADM-29 "exactly one scholarship_updated row added" $ok
+else skip T-ADM-29 "scholarship_updated row in AuditLog" "no AWS CLI"; fi
 
 for bad in '{"status":"draft"}' '{"status":"open"}' '{}'; do
   call PATCH $S/$D/status test-admin "$bad"
@@ -301,8 +307,14 @@ if [ $HAVE_AWS = yes ]; then
   result T-ADM-35 "published scholarship unchanged" $ok
 else skip T-ADM-35 "published scholarship unchanged" "no AWS CLI"; fi
 
+[ $HAVE_AWS = yes ] && CLOSED_BEFORE=$(count_action scholarship_closed)
 call PATCH $S/$D/status test-admin "$CLOSE"
 expect T-ADM-36 "close a published scholarship" 200 '"status":"closed"'
+if [ $HAVE_AWS = yes ]; then
+  STATUS="AuditLog scholarship_closed $CLOSED_BEFORE -> $(count_action scholarship_closed)"
+  [ "$(count_action scholarship_closed)" -eq $((CLOSED_BEFORE + 1)) ] && ok=ok || ok=no
+  result T-ADM-36 "exactly one scholarship_closed row added" $ok
+else skip T-ADM-36 "scholarship_closed row in AuditLog" "no AWS CLI"; fi
 call PATCH $S/$D/status test-admin "$CLOSE"
 expect T-ADM-36 "close it again" 409 "Only a published scholarship can be closed"
 call PATCH $S/$D/status test-admin "$PUB"
@@ -323,6 +335,46 @@ WON=$(printf '%s\n' "$CODES" | grep -c '^200$'); LOST=$(printf '%s\n' "$CODES" |
 STATUS="200 x$WON, 409 x$LOST"
 [ "$WON" = 1 ] && [ "$LOST" = 4 ] && ok=ok || ok=no
 result T-ADM-37 "5 parallel publishes: exactly one 200, four 409" $ok
+
+# Corrupt or legacy records written straight into DynamoDB (not through the API, which would refuse them):
+# publish must still say 409 and change nothing. Both are deleted again at the end.
+put_raw_draft() { # $1 id, $2 awards, $3 third weight: a draft with a future deadline, maybe broken
+  local item
+  item=$(node -e '
+const [id, awards, w3] = process.argv.slice(1);
+const c = (cid, name, w) => ({ M: { criterionId: { S: cid }, name: { S: name }, description: { S: "Legacy" }, weight: { N: w } } });
+process.stdout.write(JSON.stringify({
+  scholarshipId: { S: id }, title: { S: "Legacy record (test)" }, description: { S: "Written straight into DynamoDB." },
+  deadline: { S: "2027-01-15T23:59:00.000Z" }, awards: { N: awards }, acceptedCount: { N: "0" }, status: { S: "draft" },
+  rubric: { L: [c("academic", "Academic", "40"), c("essay", "Essay", "40"), c("need", "Need", w3)] },
+  eligibility: { M: { allowedDomains: { L: [{ S: "example-university.edu" }] }, minGpa: { N: "3" }, years: { L: [{ N: "2" }] } } },
+  createdBy: { S: "legacy-import" }, createdAt: { S: "2026-01-01T00:00:00.000Z" } }));' "$1" "$2" "$3")
+  AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Scholarships --item "$item"
+}
+delete_raw() { AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Scholarships --key "{\"scholarshipId\":{\"S\":\"$1\"}}"; }
+
+if [ $HAVE_AWS = yes ]; then
+  BAD_AWARDS=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
+  BAD_RUBRIC=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
+  put_raw_draft "$BAD_AWARDS" 0 20     # awards 0, rubric fine
+  put_raw_draft "$BAD_RUBRIC" 2 10     # awards fine, weights 40 + 40 + 10 = 90
+  PUBLISHED_BEFORE=$(count_action scholarship_published)
+
+  call PATCH $S/$BAD_AWARDS/status test-admin "$PUB"
+  expect T-ADM-38 "publish a stored draft with awards 0" 409 "Awards must be at least 1"
+  call PATCH $S/$BAD_RUBRIC/status test-admin "$PUB"
+  expect T-ADM-38 "publish a stored draft whose weights sum to 90" 409 "rubric is not valid"
+
+  STATUS="status $(field "$BAD_AWARDS" status) / $(field "$BAD_RUBRIC" status), scholarship_published $PUBLISHED_BEFORE -> $(count_action scholarship_published)"
+  [ "$(field "$BAD_AWARDS" status)" = draft ] && [ "$(field "$BAD_RUBRIC" status)" = draft ] \
+    && [ "$(count_action scholarship_published)" = "$PUBLISHED_BEFORE" ] && ok=ok || ok=no
+  result T-ADM-38 "both still drafts, no publish written to AuditLog" $ok
+
+  delete_raw "$BAD_AWARDS"; delete_raw "$BAD_RUBRIC"
+  STATUS="after cleanup: '$(field "$BAD_AWARDS" status)' '$(field "$BAD_RUBRIC" status)'"
+  [ "$(field "$BAD_AWARDS" status)" = None ] && [ "$(field "$BAD_RUBRIC" status)" = None ] && ok=ok || ok=no
+  result T-ADM-38 "test records deleted again" $ok
+else skip T-ADM-38 "publish a corrupt stored record" "no AWS CLI"; fi
 
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"

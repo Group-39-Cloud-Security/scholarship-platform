@@ -360,3 +360,7 @@ Content-Type: application/json
 { "status": "closed" }
 
 ### T-ADM-37 five publishes at the same time: exactly one 200 — needs parallel requests, so only in tests/api-tests.sh
+
+### T-ADM-38 publish a corrupt or legacy record (awards 0, or weights not summing to 100): 409, nothing changes.
+# The API never stores such a record, so the runner writes it straight into DynamoDB, tries the publish, and deletes it:
+# only in tests/api-tests.sh
