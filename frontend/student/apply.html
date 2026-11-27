@@ -1,2 +1,54 @@
-<!-- student/apply.html — Owner: Mohamed Khalil. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- student/apply.html?scholarship=<scholarshipId> — Owner: Mohamed Khalil. Apply with essay + one PDF. Calls the API via ../js/api.js; textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Apply | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>Apply for a scholarship</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p class="hint">Scholarship: <strong id="scholarship-name">-</strong></p>
+
+    <form id="apply-form" class="form" novalidate>
+      <label for="essay">Essay (200 to 1000 words, at most 10,000 characters)</label>
+      <textarea id="essay" rows="12" maxlength="10000" required></textarea>
+      <p class="hint" id="word-count">0 words</p>
+
+      <label for="gpa">GPA (0 to 4)</label>
+      <input id="gpa" type="number" min="0" max="4" step="0.01" inputmode="decimal" required>
+
+      <label for="year">Year of study</label>
+      <select id="year" required>
+        <option value="">Choose a year</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+      </select>
+
+      <label for="pdf">Supporting document (one PDF, at most 2 MB)</label>
+      <input id="pdf" type="file" accept="application/pdf,.pdf" required>
+
+      <p class="hint">GPA and year are checked by the reviewer against your PDF.</p>
+      <p><button type="submit">Submit application</button></p>
+    </form>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="apply.js"></script>
+</body>
+</html>
