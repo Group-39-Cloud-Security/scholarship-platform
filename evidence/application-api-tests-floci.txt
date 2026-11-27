@@ -1,0 +1,69 @@
+application-service API tests
+Date:    2026-11-27T23:01:52Z
+Target:  http://ff2607349c.execute-api.localhost.floci.io:4566 (API Gateway HTTP API on Floci -> Lambda application-service)
+Code:    ba2f680
+
+== tests/api-tests.js (T-APP-01 to T-APP-43)
+Testing http://ff2607349c.execute-api.localhost.floci.io:4566
+
+PASS  T-APP-01   browse without a token → 401  (actual: 401 UNAUTHENTICATED "Login required.")
+PASS  T-APP-02   browse → 200, only published (no draft/closed)  (actual: 200; listed: test-expired,test-open-2,test-open-3,test-open-4,test-open,test-strict)
+PASS  T-APP-03   list never shows createdBy/acceptedCount  (actual: 200; 6 scholarships; fields scholarshipId,title,description,deadline,awards,isOpen,eligibility,rubric)
+PASS  T-APP-04   search "merit" → only the matching one  (actual: 200; matched: test-open)
+PASS  T-APP-05   search given twice → 400  (actual: 400 VALIDATION_ERROR "search must be text of at most 100 characters.")
+PASS  T-APP-06   draft by id → 404 SCHOLARSHIP_NOT_FOUND  (actual: 404 SCHOLARSHIP_NOT_FOUND "Scholarship not found.")
+PASS  T-APP-07   any logged-in role may view one → 200  (actual: 200)
+PASS  T-APP-08   apply as admin → 403 FORBIDDEN  (actual: 403 FORBIDDEN "You do not have permission to do this.")
+PASS  T-APP-09   apply without a token → 401  (actual: 401 UNAUTHENTICATED "Login required.")
+PASS  T-APP-10   apply with text/plain → 415  (actual: 415 UNSUPPORTED_MEDIA_TYPE "Content-Type must be application/json.")
+PASS  T-APP-11   apply with broken JSON → 400  (actual: 400 VALIDATION_ERROR "Request body is not valid JSON.")
+PASS  T-APP-12   essay under 200 words → 400  (actual: 400 VALIDATION_ERROR "Essay must be between 200 and 1000 words (it has 2)."; Essay must be between 200 and 1000 words (it has 2).)
+PASS  T-APP-13   gpa sent as a string → 400  (actual: 400 VALIDATION_ERROR "GPA must be a number.")
+PASS  T-APP-14   yearOfStudy 9 → 400  (actual: 400 VALIDATION_ERROR "Year of study must be between 1 and 6.")
+PASS  T-APP-15   file that is not a PDF (by content) → 400  (actual: 400 VALIDATION_ERROR "The file must be a PDF (its content does not start with %PDF-)."; The file must be a PDF (its content does not start with %PDF-).)
+PASS  T-APP-16   pdfBase64 not base64 → 400  (actual: 400 VALIDATION_ERROR "pdfBase64 is not valid base64.")
+PASS  T-APP-17   PDF over 2 MB → 413  (actual: 413 PAYLOAD_TOO_LARGE "The PDF must be at most 2 MB.")
+PASS  T-APP-18   apply to a draft → 404  (actual: 404 SCHOLARSHIP_NOT_FOUND "Scholarship not found.")
+PASS  T-APP-19   apply to a closed scholarship → 409  (actual: 409 CONFLICT "This scholarship is closed and no longer accepts applications."; This scholarship is closed and no longer accepts applications.)
+PASS  T-APP-20   apply after the deadline → 409  (actual: 409 CONFLICT "The deadline for this scholarship has passed."; The deadline for this scholarship has passed.)
+PASS  T-APP-21   email domain not allowed → 409 with reason  (actual: 409 CONFLICT "This scholarship is only open to students with an email from: other-university.edu."; This scholarship is only open to students with an email from: other-university.edu.)
+PASS  T-APP-22   valid application → 201 submitted  (actual: 201; status submitted, applicationId 457325e9-14a1-4a50-b239-ff889eb78dc5)
+PASS  T-APP-23   second application to the same scholarship → 409  (actual: 409 CONFLICT "You have already applied for this scholarship."; You have already applied for this scholarship.)
+PASS  T-APP-24   mine → 200 with my application + timeline  (actual: 200)
+PASS  T-APP-25   body studentId/status were ignored (still mine, still submitted)  (actual: 200; status submitted)
+PASS  T-APP-26   student view has no reviewerId/flag/essay  (actual: 200; fields applicationId,scholarshipId,scholarshipTitle,deadline,status,gpa,yearOfStudy,submittedAt,timeline,canWithdraw)
+PASS  T-APP-27   student 2 doesn't see student 1's application  (actual: 200)
+PASS  T-APP-28   mine as reviewer → 403  (actual: 403 FORBIDDEN "You do not have permission to do this.")
+PASS  T-APP-29   own PDF → 200 presigned URL, 300 s, no-store  (actual: 200)
+FAIL  T-APP-30   presigned URL downloads the same PDF  (actual: 200; presigned URL not reachable from this machine)
+PASS  T-APP-31   another student's PDF → 404 (not 403, ids can't be probed)  (actual: 404 APPLICATION_NOT_FOUND "Application not found.")
+PASS  T-APP-32   unknown id → 404  (actual: 404 APPLICATION_NOT_FOUND "Application not found.")
+PASS  T-APP-33   2nd and 3rd active applications → 201  (actual: 201; 2nd 201, 3rd 201)
+PASS  T-APP-34   4th active application → 409 (max 3)  (actual: 409 CONFLICT "You already have 3 active applications. Wait for a decision or withdraw one first."; You already have 3 active applications. Wait for a decision or withdraw one first.)
+PASS  T-APP-35   withdraw someone else's application → 404  (actual: 404 APPLICATION_NOT_FOUND "Application not found.")
+PASS  T-APP-36   withdraw after a reviewer claimed it → 409  (actual: 409 CONFLICT "Only applications that a reviewer has not picked up yet can be withdrawn.")
+PASS  T-APP-37   claimed application: timeline "Being reviewed", reviewer hidden  (actual: 200; status under_review, being reviewed true, reviewerId shown false, canWithdraw false)
+PASS  T-APP-38   withdraw own submitted application → 204  (actual: 204)
+PASS  T-APP-39   withdrawn application is gone → 404  (actual: 404 APPLICATION_NOT_FOUND "Application not found.")
+PASS  T-APP-40   after withdrawing, a new application fits under the limit → 201  (actual: 201)
+PASS  T-APP-41   re-apply to the withdrawn scholarship while 3 are active → 409 (limit)  (actual: 409 CONFLICT "You already have 3 active applications. Wait for a decision or withdraw one first.")
+PASS  T-APP-42   security headers on every response  (actual: 200; nosniff=nosniff, frame=DENY, csp=default-src 'none')
+PASS  T-APP-43   route that does not exist → 404  (actual: 404)
+
+cleanup: removed 3 application(s) created by this run (with their PDFs and lock rows)
+
+42/43 passed
+
+== tests/concurrency-tests.js (T-APP-44 to T-APP-48)
+Concurrency tests against http://ff2607349c.execute-api.localhost.floci.io:4566
+
+PASS  T-APP-44   same scholarship, 2 requests at once → exactly one 201  (actual: 409 201 You have already applied for this scholarship.)
+PASS  T-APP-45   only one application stored for that scholarship  (actual: 1 stored)
+PASS  T-APP-46   with 2 active, 2 requests at once for different scholarships → exactly one 201  (actual: 201 | 409 201 You already have 3 active applications. Wait for a decision or withdraw one first.)
+PASS  T-APP-47   never more than 3 active applications stored  (actual: 3 active)
+PASS  T-APP-48   after a withdraw, the same scholarship can be applied to again → 204 then 201  (actual: 204 201 )
+
+cleanup: 0 removed directly, 0 application(s) left for test-student-1
+5/5 passed
+
+47 passed, 1 failed, 0 skipped
