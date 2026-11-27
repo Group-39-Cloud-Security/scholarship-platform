@@ -182,7 +182,7 @@ Proves API Gateway reaches the Lambda. Says nothing about tables, versions or se
 | scholarshipId | string (UUID) | Server | `crypto.randomUUID()`; a value in the body is ignored |
 | title | string | Client | trimmed, 3-100 characters |
 | description | string | Client | trimmed, 10-2000 characters |
-| deadline | ISO 8601 UTC | Client | a real date (`2027-01-15T23:59:00Z`); stored as `toISOString()` so `status-deadline-index` sorts correctly. Must be in the future to publish |
+| deadline | ISO 8601 UTC | Client | a full date-time with a zone: `2027-01-15T23:59:00Z` or `2027-01-16T01:59:00+02:00`. A bare date (`2027-01-15`), a missing zone, or a date that doesn't exist (`2027-02-30`, `2027-04-31`) is a 400, never rolled over. Year 2000-2100. Stored as `toISOString()` (UTC) so `status-deadline-index` sorts correctly. **May be in the past on a draft**; must be in the future to publish (409, see below) |
 | awards | int | Client | 1-1000; how many applications can be accepted |
 | acceptedCount | int | Server | starts at 0; atomic counter, never more than `awards` |
 | status | enum | Server | `draft` on create, then `published`, `closed` (PATCH status) |
@@ -227,3 +227,10 @@ Proves API Gateway reaches the Lambda. Says nothing about tables, versions or se
 }
 ```
 Writes `scholarship_created` to `AuditLog`. `400` invalid field (one clear message, e.g. "Rubric weights must sum to 100 (they sum to 90)."), bad JSON, `401`, `403` (also written to `AuditLog` as `forbidden`), `415`
+
+**Deadline rules across the life of a scholarship (§6):**
+- **Create and edit (draft):** the deadline only has to be a real date-time. A past deadline is accepted (`201`), so an admin can prepare a draft and fix the date later. No `409` on create.
+- **Publish** (`PATCH /api/admin/scholarships/{id}/status` with `published`, step 4, not built yet): `409 CONFLICT` if the deadline is not in the future at that moment, if `awards` < 1, or if the rubric is not valid. Checked by the server clock, inside the same conditional update that changes the status.
+- **After publish:** rubric, eligibility and deadline are locked. Editing (`PUT`) a `published` or `closed` scholarship is `409 CONFLICT` (step 4).
+
+**Years of study:** `years` accepts whole numbers 1-6. §6 doesn't set a numeric range; application-service must accept the same range for `yearOfStudy` (to confirm with Khalil, see `docs/decisions.md`).

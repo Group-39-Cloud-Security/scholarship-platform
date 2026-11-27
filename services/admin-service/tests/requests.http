@@ -1,4 +1,6 @@
-# REST Client tests for admin-service. Copy rows into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
+# REST Client requests for admin-service: one example per T-ADM test ID, for trying a case by hand.
+# The repeatable test run (every T-ADM ID, with PASS/FAIL) is tests/api-tests.sh; its saved outputs in evidence/
+# are what docs/api-test-plan.md points to. IDs here match the test plan.
 # Local run (npm run dev) uses @local; after deploy, switch @baseUrl to the Floci API (platform/vars.sh prints API_ID).
 @local = http://localhost:3000
 @floci = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
@@ -73,6 +75,35 @@ Content-Type: application/json
   "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
 }
 
+### T-ADM-12 weight that is not a whole number (4.5; "40" as text gives the same): 400 must be a whole number
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 4.5 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 95.5 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-13 rubric with only 1 criterion: 400 between 2 and 6 criteria
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 100 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
 ### T-ADM-14 duplicate criterionId: 400 "Rubric criterionId "academic" is used twice."
 POST {{baseUrl}}/api/admin/scholarships
 Authorization: Bearer test-admin
@@ -103,6 +134,21 @@ Content-Type: application/json
   "eligibility": { "allowedDomains": ["bue.edu.eg"], "minGpa": 3, "years": [2, 3] }
 }
 
+### T-ADM-16 one bad eligibility value (minGpa 5; the runner also tries "3", year 7, bad deadline, awards 0, no title): 400
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15T23:59:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 5, "years": [2, 3] }
+}
+
 ### T-ADM-17 valid, with server-only fields in the body: 201 draft, acceptedCount 0, createdBy test-admin, new UUID (body values ignored)
 POST {{baseUrl}}/api/admin/scholarships
 Authorization: Bearer test-admin
@@ -118,4 +164,55 @@ Content-Type: application/json
   ],
   "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] },
   "status": "published", "acceptedCount": 99, "createdBy": "hacker", "scholarshipId": "chosen-by-client"
+}
+
+### T-ADM-18 nothing is written on a 400: needs a table count before and after, so it is only in tests/api-tests.sh
+
+### T-ADM-19 GET /api/admin/scholarships is not a route yet: through API Gateway 404 {"message":"Not Found"} (set @baseUrl = {{floci}})
+GET {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+
+### T-ADM-20 deadline without time and zone: 400 (a bare date would silently mean midnight UTC)
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-01-15", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-21 deadline that does not exist (30 February): 400, not rolled over to 2 March
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2027-02-30T10:00:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
+}
+
+### T-ADM-22 past deadline on a draft: 201 (allowed; publishing it will give 409 until the deadline is in the future)
+POST {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer test-admin
+Content-Type: application/json
+
+{
+  "title": "Cloud Excellence Award", "description": "For students building on the cloud.",
+  "deadline": "2020-01-01T00:00:00Z", "awards": 2,
+  "rubric": [
+    { "criterionId": "academic", "name": "Academic record", "description": "Grades and transcript", "weight": 50 },
+    { "criterionId": "essay", "name": "Essay", "description": "Clarity and motivation", "weight": 50 }
+  ],
+  "eligibility": { "allowedDomains": ["example-university.edu"], "minGpa": 3, "years": [2, 3] }
 }

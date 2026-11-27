@@ -8,12 +8,23 @@ const { validationError } = require('../../shared/errors');
 const { checkText, checkNumber, checkInt } = require('../../shared/validate');
 
 const CRITERION_ID = /^[a-z][a-z0-9_-]{1,29}$/; // short slug like "academic": stable key for review scores
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2}))?$/;
+// Date AND time AND zone are required: a bare "2027-01-15" would silently mean midnight UTC.
+const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|([+-])(\d{2}):(\d{2}))$/;
 
-// Deadline as an ISO 8601 date. Stored in one format (UTC, toISOString) so the status-deadline-index sorts correctly.
+// Deadline as a full ISO 8601 date-time with a zone (Z or ±hh:mm). Every part is range-checked by hand because
+// Date.parse rolls impossible dates over (2027-02-30 would become 2 March) instead of rejecting them.
+// May be in the past on a draft: §6 only requires a future deadline at publish.
+// Stored in one format (UTC, toISOString) so the status-deadline-index sorts correctly.
 function checkDeadline(value) {
-  if (typeof value !== 'string' || !ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) {
-    throw validationError('Deadline must be an ISO 8601 date, for example 2027-01-15T23:59:00Z.');
+  const bad = () => validationError('Deadline must be a real ISO 8601 date and time with a zone, for example 2027-01-15T23:59:00Z.');
+  const m = typeof value === 'string' ? ISO_DATE_TIME.exec(value) : null;
+  if (!m) throw bad();
+  const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6] || '0'].map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate(); // day 0 of the next month = last day of this one
+  const zoneOk = m[7] === 'Z' || (Number(m[9]) <= 14 && Number(m[10]) <= 59);
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > daysInMonth
+      || hour > 23 || minute > 59 || second > 59 || !zoneOk) {
+    throw bad();
   }
   return new Date(value).toISOString();
 }
