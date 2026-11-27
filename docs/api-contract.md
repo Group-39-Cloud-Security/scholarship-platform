@@ -160,3 +160,17 @@ Reads `status-index` for `under_review` applications with `claimedAt` older than
 ```
 
 ## admin-service
+
+Owner: Mohamed Wael. Lambda `admin-service` (the routes below) and `notification-sender` (SQS consumer, no HTTP route). Every route except `GET /api/health` needs `Authorization: Bearer <token>` with role `admin`. Filled in step by step as each function is built.
+
+Error responses use the shared shape, for example:
+```json
+{ "error": { "code": "ROUTE_NOT_FOUND", "message": "Route not found." } }
+```
+
+### GET /api/health  [anyone, no token]
+Proves API Gateway reaches the Lambda. Says nothing about tables, versions or secrets.
+```json
+{ "status": "ok", "environment": "production", "runtime": "lambda" }
+```
+`200`. `runtime` is `local` under `npm run dev`. Every admin response also carries `Cache-Control: no-store`.

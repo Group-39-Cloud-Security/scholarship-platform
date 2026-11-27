@@ -26,3 +26,10 @@
 | T-REV-22 | review-service | GET with Origin http://evil.example | no Access-Control-Allow-Origin header |  |  |  |
 | T-REV-23 | review-service | Any review response | X-Content-Type-Options nosniff, X-Frame-Options DENY, CSP default-src 'none', no X-Powered-By |  |  |  |
 | T-REV-24 | review-service | Essay containing `<script>` opened on reviewer/review.html | shown as text, never run (textContent) |  |  |  |
+| T-ADM-01 | admin-service | GET /api/health through API Gateway, no token | 200 `{ status: ok, environment: production, runtime: lambda }` | 200, runtime lambda (27 Nov, Floci) | Pass | requests.http |
+| T-ADM-02 | admin-service | GET /api/admin/nope through API Gateway | 404 `{"message":"Not Found"}` from API Gateway, no log line | 404 `{"message":"Not Found"}` | Pass | requests.http |
+| T-ADM-03 | admin-service | POST with body `{bad` and Content-Type application/json (local) | 400 VALIDATION_ERROR "Request body is not valid JSON." | 400 VALIDATION_ERROR | Pass | requests.http |
+| T-ADM-04 | admin-service | GET /api/health with Origin http://localhost:4566 | Access-Control-Allow-Origin: http://localhost:4566 | header present | Pass | requests.http |
+| T-ADM-05 | admin-service | GET /api/health with Origin http://evil.example | no Access-Control-Allow-Origin header | no header | Pass | requests.http |
+| T-ADM-06 | admin-service | OPTIONS /api/health preflight from http://localhost:4566 | 204 with Access-Control-Allow-Methods/Headers | 204 | Pass | requests.http |
+| T-ADM-07 | admin-service | Any admin response | X-Content-Type-Options nosniff, X-Frame-Options DENY, CSP default-src 'none', Cache-Control no-store, no X-Powered-By | all present, no X-Powered-By | Pass | requests.http |

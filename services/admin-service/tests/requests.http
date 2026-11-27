@@ -2,6 +2,7 @@
 # Local run (npm run dev) uses @local; after deploy, switch @baseUrl to the Floci API (platform/vars.sh prints API_ID).
 @local = http://localhost:3000
 @floci = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
+# API_ID changes after a Floci reset: run  source platform/vars.sh && echo $API_ID  and paste it above.
 @baseUrl = {{local}}
 @site = http://localhost:4566
 
@@ -30,3 +31,6 @@ OPTIONS {{baseUrl}}/api/health
 Origin: {{site}}
 Access-Control-Request-Method: PATCH
 Access-Control-Request-Headers: authorization,content-type
+
+### T-ADM-07 security headers on every response: nosniff, DENY, CSP default-src 'none', Cache-Control no-store, no X-Powered-By
+GET {{baseUrl}}/api/health
