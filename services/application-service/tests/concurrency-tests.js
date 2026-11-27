@@ -1,11 +1,13 @@
 // concurrency-tests.js — the apply limits must hold when requests arrive at the same moment.
 // Owner: Mohamed Khalil.   Usage (from services/application-service, after npm run test-data):
 //   API_URL=http://localhost:3000 node tests/concurrency-tests.js      (or the Floci API URL)
-// Uses test-student-1 and cleans up ONLY the applications this run created (withdrawn through the API,
-// which also releases their lock rows). If test-student-1 already has applications, the run is SKIPPED.
+// Uses test-student-1 and cleans up ONLY the applications this run created (tests/testRun.js): first through
+// the API (withdraw releases the lock rows), then directly for any it could not withdraw.
+// If test-student-1 already has applications this run did not create, the run is SKIPPED and nothing is deleted.
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { createTestRun } = require('./testRun');
 
 const API = (process.env.API_URL || 'http://localhost:3000').replace(/\/$/, '');
 const APPS = process.env.APPLICATIONS_TABLE || 'Applications';
@@ -14,7 +16,7 @@ const STUDENT = 'test-student-1';
 
 const essay = Array.from({ length: 250 }, (_, i) => `word${i}`).join(' ');
 const pdf = Buffer.from('%PDF-1.4\n%%EOF\n').toString('base64');
-const created = new Set(); // every applicationId this run created: the only rows it may remove
+const run = createTestRun([STUDENT]); // remembers every applicationId this run created: the only rows it may remove
 
 const results = [];
 function check(id, name, ok, detail = '') {
@@ -29,7 +31,7 @@ async function apply(scholarshipId) {
     body: JSON.stringify({ scholarshipId, essay, gpa: 3.2, yearOfStudy: 2, pdfBase64: pdf }),
   });
   const json = await res.json().catch(() => null);
-  if (res.status === 201 && json?.applicationId) created.add(json.applicationId);
+  if (res.status === 201) run.track(json?.applicationId);
   return { status: res.status, json };
 }
 
@@ -37,7 +39,7 @@ async function withdraw(applicationId) {
   const res = await fetch(`${API}/api/applications/${applicationId}`, {
     method: 'DELETE', headers: { Authorization: `Bearer ${STUDENT}` },
   });
-  if (res.status === 204) created.delete(applicationId);
+  if (res.status === 204) run.forget(applicationId);
   return res.status;
 }
 
@@ -53,10 +55,10 @@ const ACTIVE = ['submitted', 'under_review', 'reviewed'];
 
 (async () => {
   console.log(`Concurrency tests against ${API}\n`);
-  const before = await studentApplications();
-  if (before.length > 0) {
-    console.log(`SKIP  all tests: ${STUDENT} already has ${before.length} application(s) this run did not create:`);
-    for (const a of before) console.log(`        ${a.applicationId} (${a.scholarshipId}, ${a.status})`);
+  const foreign = await run.foreignRows();
+  if (foreign.length > 0) {
+    console.log(`SKIP  all tests: ${STUDENT} already has ${foreign.length} application(s) this run did not create:`);
+    for (const a of foreign) console.log(`        ${a.applicationId} (${a.scholarshipId}, ${a.status})`);
     console.log('      Nothing was deleted. Withdraw or remove them, then run again.');
     process.exit(0);
   }
@@ -90,13 +92,12 @@ const ACTIVE = ['submitted', 'under_review', 'reviewed'];
     check('T-APP-48', 'after a withdraw, the same scholarship can be applied to again → 204 then 201',
       w === 204 && again.status === 201, `${w} ${again.status} ${again.json?.error?.message || ''}`);
   } finally {
-    // Clean up only what this run created. Withdraw also deletes the PDF and the lock rows.
-    for (const id of [...created]) {
-      const status = await withdraw(id);
-      if (status !== 204) console.log(`      cleanup: could not withdraw ${id} (${status})`);
-    }
+    // Clean up only what this run created. Withdraw also deletes the PDF and the lock rows;
+    // anything that can't be withdrawn is removed directly (still only this run's rows).
+    for (const id of [...run.created]) await withdraw(id);
+    const removedDirectly = await run.cleanup();
     const left = await studentApplications();
-    console.log(`\ncleanup: ${created.size} of this run's applications left, ${left.length} application(s) for ${STUDENT} in total`);
+    console.log(`\ncleanup: ${removedDirectly} removed directly, ${left.length} application(s) left for ${STUDENT}`);
   }
 
   const failed = results.filter((x) => !x.ok).length;

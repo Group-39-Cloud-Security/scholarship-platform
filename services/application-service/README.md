@@ -23,6 +23,7 @@ scripts/test-scholarships.js   Phase A test data only (8 scholarships with ids t
 tests/unit.test.js             pure rules (no AWS)
 tests/api-tests.js             43 end-to-end tests, PASS/FAIL per test ID
 tests/concurrency-tests.js     the apply limits under simultaneous requests (T-APP-44 to 48)
+tests/testRun.js               cleanup helper: removes only the applications a run created; skips if others exist
 ```
 
 ## Run (Git Bash, from this folder, Floci running, `platform/shared.sh` done once)
