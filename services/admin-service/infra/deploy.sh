@@ -4,7 +4,7 @@
 # Owner: Mohamed Wael · Rules: CLAUDE.md §2 (who creates what), §4 (names), §7 (IAM), §8 (routes)
 # Safe to re-run: every step checks whether the thing already exists, and updates it if it does.
 #
-# Creates: Scholarships (+ the local test fixture Applications), the notifications queues, the Brevo key in
+# Creates: Scholarships, the notifications queues, the Brevo key in
 # SSM (from the local .env, never printed), admin-service and notification-sender with their roles, the SQS trigger
 # for notification-sender, and the admin routes from §8.
 set -e
@@ -39,28 +39,6 @@ if ! aws dynamodb describe-table --table-name Scholarships >/dev/null 2>&1; then
 else
   echo "table Scholarships exists"
 fi
-
-# ---------- 1b. LOCAL TEST FIXTURE: Applications table ------------------------------------------------
-# Applications belongs to application-service (Khalil, CLAUDE.md §5). It is created here ONLY so admin-service's
-# decision step can be tested on Floci before his deploy.sh exists. Same key and indexes as §5, and it is only
-# created if missing, so his script's table wins once it runs first.
-# REMOVE THIS WHOLE SECTION when services/application-service/infra/deploy.sh creates the table.
-if ! aws dynamodb describe-table --table-name Applications >/dev/null 2>&1; then
-  aws dynamodb create-table --table-name Applications \
-    --attribute-definitions AttributeName=applicationId,AttributeType=S AttributeName=studentId,AttributeType=S \
-      AttributeName=scholarshipId,AttributeType=S AttributeName=status,AttributeType=S AttributeName=submittedAt,AttributeType=S \
-    --key-schema AttributeName=applicationId,KeyType=HASH \
-    --global-secondary-indexes '[
-      {"IndexName":"studentId-index","KeySchema":[{"AttributeName":"studentId","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}},
-      {"IndexName":"scholarshipId-index","KeySchema":[{"AttributeName":"scholarshipId","KeyType":"HASH"},{"AttributeName":"submittedAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},
-      {"IndexName":"status-index","KeySchema":[{"AttributeName":"status","KeyType":"HASH"},{"AttributeName":"submittedAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
-    --billing-mode PAY_PER_REQUEST >/dev/null
-  aws dynamodb wait table-exists --table-name Applications
-  echo "created table Applications (LOCAL TEST FIXTURE, owned by application-service)"
-else
-  echo "table Applications exists"
-fi
-# ---------- end of LOCAL TEST FIXTURE ----------------------------------------------------------------
 
 # ---------- 1c. SQS: notifications-dlq, then notifications with a redrive policy (§2, §6 Deciding) ----------
 # A decision email message that fails 3 times (notification-sender throws) moves to notifications-dlq instead of
