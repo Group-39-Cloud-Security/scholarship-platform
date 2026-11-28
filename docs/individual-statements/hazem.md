@@ -2,7 +2,7 @@
 
 Component: Reviewer Scoring (review-service and the release-expired-claims job)
 My files: `services/review-service`, `frontend/reviewer`, `tests/e2e/run-e2e.sh`, and my parts of `docs/api-contract.md` and `docs/api-test-plan.md`
-My PRs: #8 (the service), #12 (test results), #15 (README and decisions). The end-to-end run is on the `hazem-e2e` branch.
+My PRs: #8 (the service), #12 (test results), #15 (README and decisions), #20 (tests and the e2e run on the real login), #21 (these report parts).
 
 ## 1. Owned component and functions
 My part is the reviewer side. A reviewer takes an application from the queue, scores it using the scholarship's rubric or flags it, and then the admin uses that to accept or reject the student.
