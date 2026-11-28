@@ -1,5 +1,4 @@
-<!-- index.html — login page. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only, token in sessionStorage) -->
-<!-- TODO Phase B (Khalil's auth slice): add the register form here (POST /api/auth/register: allowed email domain, password ≥ 10, Pwned Passwords). -->
+<!-- index.html — login + student registration. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only, token in sessionStorage) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,18 +26,18 @@
       <p><button type="submit">Log in</button></p>
     </form>
 
-    <!-- TODO remove in Phase B: test users from shared-lib/auth.js, so pages can be tried before login exists. -->
-    <section id="test-login" class="box">
-      <h2>Test users (Phase A only)</h2>
-      <p class="hint">Login isn't built yet. Pick a test user to try the pages. The backend accepts these tokens until Phase B.</p>
-      <label for="test-user">Test user</label>
-      <select id="test-user">
-        <option value="test-student-1">Student 1 (student1@example-university.edu)</option>
-        <option value="test-student-2">Student 2 (student2@example-university.edu)</option>
-        <option value="test-reviewer">Reviewer</option>
-        <option value="test-admin">Admin</option>
-      </select>
-      <p><button type="button" id="test-login-button" class="secondary">Continue as test user</button></p>
+    <section class="box">
+      <h2>New student?</h2>
+      <p class="hint">Register with your partner university email. Reviewer accounts are created by an admin.</p>
+      <form id="register-form" class="form" novalidate>
+        <label for="reg-name">Full name</label>
+        <input id="reg-name" type="text" autocomplete="name" minlength="2" maxlength="60" required>
+        <label for="reg-email">University email</label>
+        <input id="reg-email" type="email" autocomplete="email" maxlength="254" required>
+        <label for="reg-password">Password (at least 10 characters)</label>
+        <input id="reg-password" type="password" autocomplete="new-password" minlength="10" maxlength="72" required>
+        <p><button type="submit" class="secondary">Register</button></p>
+      </form>
     </section>
   </main>
   <script src="js/config.js"></script>

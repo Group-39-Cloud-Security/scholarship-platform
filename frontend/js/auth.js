@@ -10,6 +10,9 @@ const Auth = (() => {
   // Same key the reviewer pages use (reviewer/reviewer-common.js), so one login works everywhere.
   // sessionStorage, not localStorage (CLAUDE.md §10): the token is gone when the tab closes.
   const TOKEN_KEY = 'token';
+  // Set when login says mustChangePassword (a reviewer's temporary password). The backend blocks every
+  // other route with 403 until the password is changed; this flag only sends the user to the right page.
+  const MUST_CHANGE_KEY = 'mustChangePassword';
   const ROLES = ['student', 'reviewer', 'admin'];
 
   // The site root, worked out from where this file was loaded (…/js/auth.js → …/), so links work
@@ -18,34 +21,35 @@ const Auth = (() => {
 
   // Where each role lands after login.
   const HOME = {
-    student: 'student/my-applications.html',
+    student: 'student/scholarships.html',
     reviewer: 'reviewer/queue.html', // Hazem's page, unchanged
     admin: 'admin/index.html',       // placeholder until Wael's pages exist
   };
-
-  // TODO remove in Phase B: the temporary test tokens from shared-lib/auth.js (CLAUDE.md §2).
-  // They are not JWTs, so their role can't be decoded. After Phase B the backend answers 401 to them.
-  const TEST_TOKEN_ROLES = {
-    'test-student-1': 'student',
-    'test-student-2': 'student',
-    'test-reviewer': 'reviewer',
-    'test-admin': 'admin',
-  };
+  const CHANGE_PASSWORD_PAGE = 'change-password.html';
 
   function url(path) {
     return new URL(path, SITE_ROOT).href;
   }
 
-  function getToken() {
-    try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+  function read(key) {
+    try { return sessionStorage.getItem(key); } catch { return null; }
   }
 
-  function setToken(token) {
-    try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* storage blocked: login won't stick */ }
+  function write(key, value) {
+    try {
+      if (value === null) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, value);
+    } catch { /* storage blocked: login won't stick */ }
   }
+
+  const getToken = () => read(TOKEN_KEY);
+  const setToken = (token) => write(TOKEN_KEY, token);
+  const mustChangePassword = () => read(MUST_CHANGE_KEY) === 'true';
+  const setMustChangePassword = (on) => write(MUST_CHANGE_KEY, on ? 'true' : null);
 
   function clearToken() {
-    try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
+    write(TOKEN_KEY, null);
+    write(MUST_CHANGE_KEY, null);
   }
 
   // Reads the JWT payload without checking the signature (the browser can't, and doesn't need to:
@@ -62,11 +66,9 @@ const Auth = (() => {
     }
   }
 
-  // Role in the token, or null when there is no usable token (missing, unknown role, expired).
-  // TODO Phase B: confirm with Wael that the JWT payload carries `role` (auth-service controller plans { sub, role }).
+  // Role in the token ({ sub, role, exp } from auth-service), or null when there is no usable token.
   function roleOf(token) {
     if (!token) return null;
-    if (Object.hasOwn(TEST_TOKEN_ROLES, token)) return TEST_TOKEN_ROLES[token]; // TODO remove in Phase B
     const payload = decodeJwtPayload(token);
     if (!payload || !ROLES.includes(payload.role)) return null;
     if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) return null; // expired (1 h)
@@ -90,7 +92,9 @@ const Auth = (() => {
     return false;
   }
 
+  // Where to go right after login (or after the password change).
   function homeUrl(role) {
+    if (mustChangePassword()) return url(CHANGE_PASSWORD_PAGE);
     return HOME[role] ? url(HOME[role]) : url('index.html');
   }
 
@@ -98,5 +102,8 @@ const Auth = (() => {
     goToLogin('logged-out');
   }
 
-  return { getToken, setToken, clearToken, roleOf, getRole, requireLogin, goToLogin, homeUrl, logout, url };
+  return {
+    getToken, setToken, clearToken, roleOf, getRole, requireLogin, goToLogin, homeUrl, logout, url,
+    mustChangePassword, setMustChangePassword, CHANGE_PASSWORD_PAGE,
+  };
 })();

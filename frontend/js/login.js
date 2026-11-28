@@ -1,5 +1,9 @@
-// login.js — logic for index.html: log in, store the token, go to the role's home page
+// login.js — logic for index.html: log in or register, store the token, go to the role's home page
 // Owner: Mohamed Khalil (shared shell)   ·   Rules: CLAUDE.md §6 (login never says whether the email exists), §10
+//
+// POST /api/auth/login    { email, password }        → 200 { token, user: { role, mustChangePassword, ... } }
+//                                                       401 wrong details · 429 this email + IP is blocked for a while
+// POST /api/auth/register { email, name, password }  → 201, then the same login call
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -11,7 +15,7 @@
     'logged-out': ['You have logged out.', 'success'],
   };
 
-  // Already logged in with a usable token: go straight to the right home page.
+  // Already logged in with a usable token: go straight to the right page.
   const role = Auth.getRole();
   if (role) {
     window.location.replace(Auth.homeUrl(role));
@@ -22,13 +26,14 @@
   const reason = new URLSearchParams(window.location.search).get('reason');
   if (Object.hasOwn(REASONS, reason || '')) showMessage(message, ...REASONS[reason]);
 
-  function enter(token) {
+  // Error messages (401, 429, validation) come from auth-service as they are.
+  async function logIn(email, password) {
+    const data = await apiRequest('/api/auth/login', { method: 'POST', body: { email, password }, auth: false });
+    const token = data && typeof data.token === 'string' ? data.token : '';
     const tokenRole = Auth.roleOf(token);
-    if (!tokenRole) {
-      showMessage(message, 'Login worked, but the server sent a token without a known role. Ask the team to check auth-service.');
-      return;
-    }
+    if (!tokenRole) throw new Error('Login worked, but the server sent a token without a known role.');
     Auth.setToken(token);
+    Auth.setMustChangePassword(Boolean(data.user && data.user.mustChangePassword));
     window.location.replace(Auth.homeUrl(tokenRole));
   }
 
@@ -40,26 +45,33 @@
       showMessage(message, 'Enter your email and password.');
       return;
     }
-    const button = e.submitter || e.target.querySelector('button');
-    button.disabled = true;
+    const done = busy(e.submitter || e.target.querySelector('button'), 'Logging in…');
     showMessage(message, '');
     try {
-      // TODO Phase B (Wael's login slice): confirm the response shape. Assumed: 200 { "token": "<JWT>" }.
-      const data = await apiRequest('/api/auth/login', { method: 'POST', body: { email, password }, auth: false });
-      enter(data && typeof data.token === 'string' ? data.token : '');
+      await logIn(email, password);
     } catch (err) {
-      // No status or a 404 without our error code: the login route isn't deployed yet (API Gateway answers
-      // the preflight without CORS headers, or with {"message":"Not Found"}). TODO remove the hint in Phase B.
-      if (!err.status || (err.status === 404 && !err.code)) {
-        showMessage(message, `${err.status ? 'Login is not available yet.' : err.message} If login is not deployed yet (Phase A), use a test user below.`);
-      } else {
-        showMessage(message, err.message);
-      }
-    } finally {
-      button.disabled = false;
+      showMessage(message, err.message);
+      done();
     }
   });
 
-  // TODO remove in Phase B, together with the #test-login section in index.html.
-  $('test-login-button').addEventListener('click', () => enter($('test-user').value));
+  $('register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('reg-name').value.trim();
+    const email = $('reg-email').value.trim().toLowerCase();
+    const password = $('reg-password').value;
+    if (name.length < 2 || !email || password.length < 10) {
+      showMessage(message, 'Enter your name, your university email and a password of at least 10 characters.');
+      return;
+    }
+    const done = busy(e.submitter || e.target.querySelector('button'), 'Registering…');
+    showMessage(message, '');
+    try {
+      await apiRequest('/api/auth/register', { method: 'POST', body: { email, name, password }, auth: false });
+      await logIn(email, password);
+    } catch (err) {
+      showMessage(message, err.message);
+      done();
+    }
+  });
 })();

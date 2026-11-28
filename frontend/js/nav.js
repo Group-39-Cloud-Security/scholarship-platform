@@ -1,4 +1,4 @@
-// nav.js — shared header navigation per role + startPage() for every shell page
+// nav.js — shared header navigation per role + startPage() and small helpers for every shell page
 // Owner: Mohamed Khalil (shared shell)   ·   Rules: CLAUDE.md §10 (built with textContent, never innerHTML)
 //
 // Each page has <nav id="nav" aria-label="Main"></nav> in its header and calls, first thing:
@@ -9,10 +9,9 @@
 const NAV_SECTIONS = {
   student: {
     label: 'Student',
-    links: [
+    links: [ // apply.html and application-status.html need an id, so they are opened from these two pages
+      ['Scholarships', 'student/scholarships.html'],
       ['My applications', 'student/my-applications.html'],
-      ['Apply', 'student/apply.html'],
-      ['Application status', 'student/application-status.html'],
     ],
   },
   reviewer: {
@@ -43,10 +42,11 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-function renderNav(role) {
+// links = false shows only the Log out button (used while a password change is required).
+function renderNav(role, links = true) {
   const nav = document.getElementById('nav');
   if (!nav) return;
-  const section = NAV_SECTIONS[role];
+  const section = links ? NAV_SECTIONS[role] : null;
   const here = window.location.pathname;
   const items = [];
   if (section) {
@@ -75,6 +75,10 @@ function showMessage(box, text, kind = 'error') {
 // Wrong role: the page body is replaced by a short note and the user's own nav stays usable.
 function startPage(requiredRole) {
   if (!Auth.requireLogin()) return false;
+  if (Auth.mustChangePassword()) {
+    window.location.replace(Auth.url(Auth.CHANGE_PASSWORD_PAGE));
+    return false;
+  }
   const role = Auth.getRole();
   renderNav(role);
   if (requiredRole && role !== requiredRole) {
@@ -99,4 +103,23 @@ function formatDate(iso) {
 // Same id rule as the backend (1-64 of A-Z a-z 0-9 -), so a bad ?id= never reaches a URL.
 function validId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
+}
+
+// Opens a link from the API in a new tab. Only http(s) links, and the new tab gets no access to this page.
+function openLink(link) {
+  let parsed;
+  try { parsed = new URL(link); } catch { throw new Error('The server returned an invalid link.'); }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('The server returned an invalid link.');
+  window.open(parsed.href, '_blank', 'noopener,noreferrer');
+}
+
+// Disables a button and swaps its text while work runs; returns a function that puts it back.
+function busy(button, text) {
+  const before = button.textContent;
+  button.disabled = true;
+  button.textContent = text;
+  return () => {
+    button.disabled = false;
+    button.textContent = before;
+  };
 }
