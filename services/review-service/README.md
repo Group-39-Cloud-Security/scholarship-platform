@@ -16,7 +16,7 @@ view queue, claim, score against the rubric or flag, my reviews, release (+ hour
 | `GET /api/reviews/{applicationId}/pdf` | reviewer who claimed it | 5 minute presigned link, only while under review |
 | `release-expired-claims` (hourly) | EventBridge Scheduler | claims older than 48 h go back to the queue |
 
-Request and response examples: `docs/api-contract.md` (review-service). Tests: T-REV rows in `docs/api-test-plan.md`, `tests/requests.http`, and the Postman collection `tests/postman/review-service.postman_collection.json` (import it, run `tests/local-test-data.sh`, then run the collection in order).
+Request and response examples: `docs/api-contract.md` (review-service). Tests: T-REV rows in `docs/api-test-plan.md`, `tests/requests.http`, and the Postman collection `tests/postman/review-service.postman_collection.json` (import it, run `tests/local-test-data.sh`, set `token` and `studentToken` from `platform/get-token.sh reviewer2` and `student`, then run the collection in order).
 
 ## Run
 ```bash
@@ -38,10 +38,10 @@ Lambda handlers: `src/lambda.handler` (review-service) and `handler.handler` (re
 ## Testing review-service on its own
 `bash services/review-service/tests/local-test-data.sh` (from the repo root, after `deploy-all.sh`) adds 1 scholarship, 8 submitted applications and 1 claim older than 48 h, and creates the Applications and Scholarships tables only if they are missing. Local testing only; a clean Floci (`docker compose ... down -v`) removes it.
 
-`bash services/review-service/tests/api-tests.sh` resets that test data and runs every T-REV check with curl, printing PASS or FAIL for each (save the output with `| tee evidence/review-api-tests-floci.txt`).
+`bash services/review-service/tests/api-tests.sh` resets that test data, logs in the seeded admin, student1 and reviewer2 (`platform/get-token.sh`) and runs every T-REV check with curl, printing PASS or FAIL for each (save the output with `| tee evidence/review-api-tests-floci.txt`).
 
 ## Reviewer pages
-`frontend/reviewer/queue.html`, `review.html`, `my-reviews.html`. Until the shared login page exists, open the browser console on the website and run `sessionStorage.setItem('token', 'test-reviewer')`, then open `reviewer/queue.html`.
+`frontend/reviewer/queue.html`, `review.html`, `my-reviews.html`. Log in on the website (`index.html`) as `reviewer1@example-university.edu` (or reviewer2) with `SEED_TEST_PASSWORD` from `platform/.env`; the login page sends reviewers to `reviewer/queue.html`.
 
 ## Security
 - The reviewer id always comes from the token. Status, total score and dates are never taken from the body.

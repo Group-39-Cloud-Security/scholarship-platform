@@ -1,9 +1,11 @@
 # REST Client tests for review-service. Copy results into docs/api-test-plan.md (ID, request, expected, actual, pass/fail).
-# Phase A tokens (shared/auth.js test users): test-reviewer, test-admin, test-student-1. No real secrets in this file.
-# Set baseUrl from: source ../../platform/vars.sh && echo $API_URL
+# Tokens: paste the output of bash platform/get-token.sh reviewer2 / student / admin below while testing (they last
+# 1 hour). Don't commit them. Set baseUrl from: source platform/vars.sh && echo $API_URL
 # Replace APP_ID with an applicationId from the queue (T-REV-03).
 @baseUrl = http://REPLACE_API_ID.execute-api.localhost.floci.io:4566
-@reviewer = test-reviewer
+@reviewer = PASTE_REVIEWER_TOKEN
+@student = PASTE_STUDENT_TOKEN
+@admin = PASTE_ADMIN_TOKEN
 @appId = APP_ID
 
 ### T-REV-01 queue without a token -> 401
@@ -11,7 +13,7 @@ GET {{baseUrl}}/api/reviews/queue
 
 ### T-REV-02 queue as a student -> 403
 GET {{baseUrl}}/api/reviews/queue
-Authorization: Bearer test-student-1
+Authorization: Bearer {{student}}
 
 ### T-REV-03 queue as a reviewer -> 200
 GET {{baseUrl}}/api/reviews/queue
@@ -98,11 +100,11 @@ Authorization: Bearer {{reviewer}}
 
 ### T-REV-17 admin releases any claim -> 204
 DELETE {{baseUrl}}/api/reviews/{{appId}}
-Authorization: Bearer test-admin
+Authorization: Bearer {{admin}}
 
 ### T-REV-18 student tries to release -> 403
 DELETE {{baseUrl}}/api/reviews/{{appId}}
-Authorization: Bearer test-student-1
+Authorization: Bearer {{student}}
 
 ### T-REV-22 foreign origin -> no Access-Control-Allow-Origin in the response
 GET {{baseUrl}}/api/reviews/queue
