@@ -1,5 +1,6 @@
-// apply.js — logic for student/apply.html?scholarship=<scholarshipId>  (STUB: not connected to the API yet)
-// Owner: Mohamed Khalil   ·   Rules: CLAUDE.md §6 Applying, §8 (POST /api/applications), §10
+// apply.js — logic for student/apply.html?scholarship=<scholarshipId>
+// Owner: Mohamed Khalil   ·   Rules: CLAUDE.md §6 Applying, §8 (GET /api/scholarships/{id}, POST /api/applications), §10
+//
 // The checks here only save the student a round trip. The server checks all of them again
 // (and the ones the browser can't: eligibility, deadline, one per scholarship, max 3 active).
 
@@ -8,6 +9,7 @@
 
   const $ = (id) => document.getElementById(id);
   const message = $('message');
+  const form = $('apply-form');
   const MAX_PDF_BYTES = 2 * 1024 * 1024;
   const scholarshipId = new URLSearchParams(window.location.search).get('scholarship');
 
@@ -18,18 +20,6 @@
     $('word-count').textContent = `${n} word${n === 1 ? '' : 's'}`;
   });
 
-  if (!validId(scholarshipId)) {
-    // TODO: link to student/scholarships.html once the scholarship list page is built.
-    showMessage(message, 'No scholarship selected. Open this page from a scholarship (apply.html?scholarship=<id>).', 'info');
-    $('apply-form').hidden = true;
-    return;
-  }
-
-  // TODO: load the scholarship's title (and show its eligibility rules) with
-  //   const s = await apiRequest(`/api/scholarships/${encodeURIComponent(scholarshipId)}`);
-  //   $('scholarship-name').textContent = s.title;          // 404 SCHOLARSHIP_NOT_FOUND → show err.message
-  $('scholarship-name').textContent = scholarshipId;
-
   // The PDF goes inside the JSON body as base64 (CLAUDE.md §8 PDFs).
   function readFileAsBase64(file) {
     return new Promise((resolve, reject) => {
@@ -38,6 +28,12 @@
       reader.onerror = () => reject(new Error('Could not read the PDF file.'));
       reader.readAsDataURL(file);
     });
+  }
+
+  // Same content check as the server: a PDF starts with %PDF- whatever the file is called.
+  async function looksLikePdf(file) {
+    const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    return String.fromCharCode(...head) === '%PDF-';
   }
 
   function readForm() {
@@ -54,21 +50,63 @@
     return { essay, gpa, yearOfStudy, file };
   }
 
-  $('apply-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    let form;
-    try { form = readForm(); } catch (err) { showMessage(message, err.message); return; }
+  function showScholarship(s) {
+    const e = s.eligibility || {};
+    $('title').textContent = `Apply: ${s.title}`;
+    $('description').textContent = s.description || '';
+    $('deadline').textContent = formatDate(s.deadline);
+    $('awards').textContent = s.awards;
+    $('min-gpa').textContent = typeof e.minGpa === 'number' && e.minGpa > 0 ? e.minGpa : 'None';
+    $('years').textContent = Array.isArray(e.years) && e.years.length ? e.years.join(', ') : 'Any';
+    $('domains').textContent = Array.isArray(e.allowedDomains) && e.allowedDomains.length ? e.allowedDomains.join(', ') : 'Any';
+    $('details').hidden = false;
+  }
 
-    // TODO: the real call goes here:
-    //   const button = e.submitter; button.disabled = true;
-    //   const pdfBase64 = await readFileAsBase64(form.file);
-    //   const created = await apiRequest('/api/applications', {
-    //     method: 'POST',
-    //     body: { scholarshipId, essay: form.essay, gpa: form.gpa, yearOfStudy: form.yearOfStudy, pdfBase64 },
-    //   });
-    //   → 201 { applicationId, scholarshipId, status: 'submitted', submittedAt }:
-    //     window.location.href = `application-status.html?id=${encodeURIComponent(created.applicationId)}`;
-    //   → 400 / 409 / 413: showMessage(message, err.message) — the server's message names the failed rule.
-    showMessage(message, 'The form is valid. Sending it is not connected to the API yet (TODO).', 'info');
+  async function load() {
+    if (!validId(scholarshipId)) {
+      showMessage(message, 'No scholarship selected. Choose one from the scholarship list.', 'info');
+      return;
+    }
+    showMessage(message, 'Loading the scholarship…', 'info');
+    try {
+      const s = await apiRequest(`/api/scholarships/${encodeURIComponent(scholarshipId)}`);
+      showScholarship(s);
+      if (s.isOpen) {
+        showMessage(message, '');
+        form.hidden = false;
+      } else {
+        showMessage(message, 'The deadline for this scholarship has passed, so you can no longer apply.', 'info');
+      }
+    } catch (err) {
+      showMessage(message, err.message); // 404: "Scholarship not found."
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    let input;
+    try {
+      input = readForm();
+      if (!(await looksLikePdf(input.file))) throw new Error('The file must be a PDF.');
+    } catch (err) {
+      showMessage(message, err.message);
+      return;
+    }
+
+    const done = busy(e.submitter || form.querySelector('button'), 'Submitting…');
+    showMessage(message, 'Uploading your application…', 'info');
+    try {
+      const pdfBase64 = await readFileAsBase64(input.file);
+      const created = await apiRequest('/api/applications', {
+        method: 'POST',
+        body: { scholarshipId, essay: input.essay, gpa: input.gpa, yearOfStudy: input.yearOfStudy, pdfBase64 },
+      });
+      window.location.href = `application-status.html?id=${encodeURIComponent(created.applicationId)}&submitted=1`;
+    } catch (err) {
+      showMessage(message, err.message); // 400 / 409 / 413: the server's message names the failed rule
+      done();
+    }
   });
+
+  load();
 })();

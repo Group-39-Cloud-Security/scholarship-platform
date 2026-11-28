@@ -15,11 +15,21 @@
     <nav id="nav" aria-label="Main"></nav>
   </header>
   <main>
-    <h1>Apply for a scholarship</h1>
+    <h1 id="title">Apply for a scholarship</h1>
     <p id="message" class="message" role="alert" hidden></p>
-    <p class="hint">Scholarship: <strong id="scholarship-name">-</strong></p>
 
-    <form id="apply-form" class="form" novalidate>
+    <section id="details" hidden>
+      <p id="description"></p>
+      <dl class="facts">
+        <dt>Deadline</dt><dd id="deadline">-</dd>
+        <dt>Awards</dt><dd id="awards">-</dd>
+        <dt>Minimum GPA</dt><dd id="min-gpa">-</dd>
+        <dt>Years of study</dt><dd id="years">-</dd>
+        <dt>Email domains</dt><dd id="domains">-</dd>
+      </dl>
+    </section>
+
+    <form id="apply-form" class="form" novalidate hidden>
       <label for="essay">Essay (200 to 1000 words, at most 10,000 characters)</label>
       <textarea id="essay" rows="12" maxlength="10000" required></textarea>
       <p class="hint" id="word-count">0 words</p>
@@ -44,6 +54,7 @@
       <p class="hint">GPA and year are checked by the reviewer against your PDF.</p>
       <p><button type="submit">Submit application</button></p>
     </form>
+    <p><a href="scholarships.html">Back to scholarships</a></p>
   </main>
   <script src="../js/config.js"></script>
   <script src="../js/auth.js"></script>
