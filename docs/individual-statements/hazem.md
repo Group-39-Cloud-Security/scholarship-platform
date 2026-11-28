@@ -1,7 +1,7 @@
 # Individual Contribution Statement: Mohamed Hazem
 
 Component: Reviewer Scoring (review-service and the release-expired-claims job)
-My files: `services/review-service`, `frontend/reviewer`, and my parts of `docs/api-contract.md` and `docs/api-test-plan.md`
+My files: `services/review-service`, `frontend/reviewer`, `tests/e2e/run-e2e.sh`, and my parts of `docs/api-contract.md` and `docs/api-test-plan.md`
 My PRs: #8 (the service), #12 (test results), #15 (README and decisions). The end-to-end run is on the `hazem-e2e` branch.
 
 ## 1. Owned component and functions
@@ -62,15 +62,16 @@ Examples of every request and response are in my part of `docs/api-contract.md`.
 
 ## 6. Tests
 - 6 unit tests for the scoring rules (`npm test`).
-- `tests/api-tests.sh` runs 28 checks with curl through API Gateway on Floci. This includes 5 claims sent at the same time (only one gets 201) and a 6th claim (409). All 28 passed on 27 Nov. I had one more check that opened the PDF link, but it failed because of the floci hostname (see section 9) so I removed it. Local run: `evidence/review-api-tests-local.txt`.
-- Postman collection with 20 requests and 25 checks (`tests/postman`).
+- `tests/api-tests.sh` runs 28 checks with curl through API Gateway on Floci. This includes 5 claims sent at the same time (only one gets 201) and a 6th claim (409). I had one more check that opened the PDF link, but it failed because of the floci hostname (see section 9) so I removed it.
+- After the real login was merged I changed the tests to log in with real accounts (the seeded admin, student1 and reviewer2) and ran everything again on a clean Floci on 28 Nov: 28 of 28 passed (`evidence/review-api-tests-floci.txt`).
+- Postman collection with 20 requests and 25 checks, all passed in the same run (`evidence/review-postman-floci.txt`).
 - All 24 T-REV rows in `docs/api-test-plan.md` have the actual results.
 
 [Screenshot: api-tests.sh output] [Screenshot: Postman run]
 
 ## 7. Integration work
 - Before merging I checked my service against Khalil's and Wael's code. For example, that `status-index` has the fields I need, that Khalil's lock rows never show up in my queue, that the rubric format matches, and that Wael reads `flagged` and the review for the decision email.
-- I did a full end-to-end run through API Gateway on a clean Floci (`evidence/e2e-walkthrough.md` on `hazem-e2e`). The admin created a reviewer and a scholarship, a student applied, the reviewer claimed and scored it (total 70), the student saw "reviewed", the admin accepted it, the student saw "accepted" and notification-sender was triggered. Login wasn't built yet at that time, and the email wasn't sent because I don't have a Brevo key on my laptop.
+- I did a full end-to-end run through API Gateway on a clean Floci (`tests/e2e/run-e2e.sh`, write-up in `evidence/e2e-walkthrough.md`). The first run on 27 Nov had to use test tokens because login wasn't built yet. I ran it again on 28 Nov with the real login: the admin logged in and created a reviewer and a scholarship, a new student registered and applied, the reviewer had to change his temporary password before he could do anything (403 before), then claimed and scored it (total 70), the student saw "reviewed", the admin accepted it, the student saw "accepted" and notification-sender was triggered. The email wasn't sent because I don't have a Brevo key on my laptop.
 
 ## 8. Technical decisions
 These are written in `docs/decisions.md`:
@@ -85,3 +86,5 @@ These are written in `docs/decisions.md`:
 - The PDF link didn't open on Floci because it uses `floci:4566`, which is Floci's name inside Docker. Adding `127.0.0.1 floci` to the hosts file fixes it, and on real AWS the link goes straight to S3.
 - My first metric filter never matched anything, because Lambda adds the time and request id before our JSON log line. Wael noticed it and changed it to a plain text pattern in the auth-service PR.
 - The other services weren't ready when I started testing, so I wrote `tests/local-test-data.sh` to create test applications and a scholarship.
+- When I seeded the real accounts, the seed refused my first admin password because it was in Pwned Passwords, so I used random passwords instead (they stay in `platform/.env`, which git ignores).
+- The first test run after a fresh deploy failed the expiry job check once (it found 0 old claims). I checked the table, ran the job by hand and it released the claim, and the whole run passed when I ran it again.

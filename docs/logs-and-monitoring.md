@@ -12,9 +12,9 @@ Errors and the hourly job also write short lines to the same log groups, with sa
 
 Security and business events are saved in the AuditLog table in DynamoDB with `shared-lib/audit.js` (action, userId, targetId and a short detail). Some of the actions are login, login_failed, forbidden, claim, release, review, claim_expired, pdf_download, decision and user_created. No IAM role is allowed to update or delete AuditLog items.
 
-This is the request line for T-REV-02 (a student calling the reviewer queue):
+For T-REV-02 (student1 calling the reviewer queue) the request line looks like this:
 ```json
-{"level":"warn","fn":"review-service","method":"GET","path":"/api/reviews/queue","status":403,"userId":"test-student-1","action":null}
+{"level":"warn","fn":"review-service","method":"GET","path":"/api/reviews/queue","status":403,"userId":"5eed0000-0000-4000-8000-000000000011","action":null}
 ```
 
 ## Metric filter and alarm
@@ -31,16 +31,16 @@ auth-service already slows down wrong passwords for the same email and IP. The a
 
 ## Example of an error
 
-In the end-to-end run on 27 Nov (`evidence/e2e-run-floci.txt` on the `hazem-e2e` branch), notification-sender couldn't read the Brevo key. In the raw log these are on separate lines:
+In the end-to-end run on 28 Nov (`evidence/e2e-run-floci.txt`), notification-sender couldn't read the Brevo key. In the raw log these are on separate lines:
 ```
-2026-11-27T23:56:00.766Z  bb6c974a-5322-4d97-9c21-94b3e02325d0  ERROR
-{"level":"error","fn":"notification-sender","message":"decision email failed","applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","attempt":1,"lastAttempt":false,"error":"ParameterNotFound"}
+2026-11-28T13:08:39.035Z  311020eb-7d24-4211-95ad-8b1cc8fd1da8  ERROR
+{"level":"error","fn":"notification-sender","message":"decision email failed","applicationId":"266bdf18-7c82-401d-84af-8a2117427002","attempt":1,"lastAttempt":false,"error":"ParameterNotFound"}
 ```
 The line only has the application id and the error type, there's no email address and no key. `lastAttempt` is false, so SQS tries again, and after the last try the message goes to `notifications-dlq`.
 
 ## Example of suspicious activity
 
-When a student token calls a reviewer route (T-REV-02) it gets 403. The request is logged as warn with status 403, and `shared-lib/auth.js` also writes a forbidden row to AuditLog. The admin can see these with `GET /api/admin/audit-log?action=forbidden`.
+When a student token calls a reviewer route (T-REV-02) it gets 403. The request is logged as warn with status 403, and `shared-lib/auth.js` also writes a forbidden row to AuditLog. The same happens when a new reviewer tries to work before changing his temporary password (the e2e run checks for that row). The admin can see these with `GET /api/admin/audit-log?action=forbidden`.
 
 [Screenshot: audit-log response with forbidden rows]
 
