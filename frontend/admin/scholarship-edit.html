@@ -1,2 +1,72 @@
-<!-- admin/scholarship-edit.html — Owner: Mohamed Wael. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- admin/scholarship-edit.html — Owner: Mohamed Wael. Create a draft (POST) or replace a draft (PUT ?id=), then publish. textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Scholarship | Admin | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1 id="heading">New scholarship</h1>
+    <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
+    <p id="mode-hint" class="hint">Saved as a draft. Nothing is visible to students until you publish it.</p>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <form id="form" class="form" novalidate>
+      <label for="title">Title (3-100 characters)</label>
+      <input id="title" maxlength="100" required>
+      <label for="description">Description (10-2000 characters)</label>
+      <textarea id="description" rows="4" maxlength="2000" required></textarea>
+      <label for="deadline">Deadline (your local time; must be in the future to publish)</label>
+      <input id="deadline" type="datetime-local" required>
+      <label for="awards">Awards (how many applications can be accepted, 1-1000)</label>
+      <input id="awards" type="number" min="1" max="1000" step="1" value="1" required>
+
+      <fieldset>
+        <legend>Rubric (2-6 criteria, whole-number weights that sum to 100)</legend>
+        <table class="rubric">
+          <thead><tr><th>Id (e.g. academic)</th><th>Name</th><th>What the reviewer scores</th><th>Weight</th><th></th></tr></thead>
+          <tbody id="criteria"></tbody>
+        </table>
+        <p><button type="button" id="add" class="secondary">Add a criterion</button> <span id="total" class="hint"></span></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Eligibility</legend>
+        <label for="domains">Email domains that may apply (comma separated, partner universities only)</label>
+        <input id="domains" placeholder="example-university.edu" maxlength="600">
+        <label for="mingpa">Minimum GPA (0-4)</label>
+        <input id="mingpa" type="number" min="0" max="4" step="0.01" value="0">
+        <p>Years of study</p>
+        <div id="years" class="years"></div>
+      </fieldset>
+
+      <p><button type="submit" id="save">Save draft</button></p>
+    </form>
+
+    <section id="saved" class="box" hidden>
+      <h2>Saved</h2>
+      <dl id="facts" class="facts"></dl>
+      <p class="actions">
+        <button type="button" id="publish">Publish now</button>
+        <a href="scholarships.html">Back to scholarships</a>
+      </p>
+    </section>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="admin-common.js"></script>
+  <script src="scholarship-edit.js"></script>
+</body>
+</html>

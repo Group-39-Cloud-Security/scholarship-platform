@@ -1,2 +1,48 @@
-<!-- admin/scholarships.html — Owner: Mohamed Wael. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- admin/scholarships.html — Owner: Mohamed Wael. Publish, close or edit scholarships (PATCH .../status, audit log list). textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Scholarships | Admin | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>Scholarships</h1>
+    <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
+    <p><a href="scholarship-edit.html">Create a new scholarship</a></p>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <h2>Created from this admin area</h2>
+    <p class="hint">Newest first, from the audit log (the admin API has no list endpoint yet, so titles show once you publish, close or save one here). Drafts can be edited and published; published ones can be closed. Rubric, eligibility and deadline are locked after publishing.</p>
+    <p id="empty" hidden>No scholarships have been created through the admin API yet.</p>
+    <table id="list" hidden>
+      <thead><tr><th>Scholarship</th><th>Created</th><th>Status</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Open by id</h2>
+    <p class="hint">For any other scholarship, for example the seeded ones.</p>
+    <form id="by-id" class="inline" novalidate>
+      <label>Scholarship id <input id="sid" size="38" maxlength="36" autocomplete="off" spellcheck="false"></label>
+      <button type="submit" data-to="published">Publish</button>
+      <button type="button" id="close-by-id" class="secondary">Close</button>
+      <button type="button" id="edit-by-id" class="secondary">Edit draft</button>
+    </form>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="admin-common.js"></script>
+  <script src="scholarships.js"></script>
+</body>
+</html>
