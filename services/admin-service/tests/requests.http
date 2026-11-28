@@ -7,6 +7,10 @@
 # API_ID changes after a Floci reset: run  source platform/vars.sh && echo $API_ID  and paste it above.
 @baseUrl = {{local}}
 @site = http://localhost:4566
+# Real tokens (1 hour) from the seeded users: bash platform/get-token.sh admin | student | reviewer
+@adminToken = PASTE_FROM_get-token.sh_admin
+@studentToken = PASTE_FROM_get-token.sh_student
+@reviewerToken = PASTE_FROM_get-token.sh_reviewer
 
 ### T-ADM-01 health: 200 { status: ok, runtime: local | lambda }, security headers, Cache-Control: no-store
 GET {{baseUrl}}/api/health
@@ -47,21 +51,21 @@ Content-Type: application/json
 
 ### T-ADM-09 student token: 403 FORBIDDEN, and a "forbidden" row in AuditLog with targetId /api/admin/scholarships
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-student-1
+Authorization: Bearer {{studentToken}}
 Content-Type: application/json
 
 {}
 
 ### T-ADM-10 wrong Content-Type: 415 UNSUPPORTED_MEDIA_TYPE
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: text/plain
 
 hello
 
 ### T-ADM-11 weights sum to 90: 400 "Rubric weights must sum to 100 (they sum to 90)."
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -77,7 +81,7 @@ Content-Type: application/json
 
 ### T-ADM-12 weight that is not a whole number (4.5; "40" as text gives the same): 400 must be a whole number
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -92,7 +96,7 @@ Content-Type: application/json
 
 ### T-ADM-13 rubric with only 1 criterion: 400 between 2 and 6 criteria
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -106,7 +110,7 @@ Content-Type: application/json
 
 ### T-ADM-14 duplicate criterionId: 400 "Rubric criterionId "academic" is used twice."
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -121,7 +125,7 @@ Content-Type: application/json
 
 ### T-ADM-15 domain that is not a partner university: 400 not a partner university
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -136,7 +140,7 @@ Content-Type: application/json
 
 ### T-ADM-16 one bad eligibility value (minGpa 5; the runner also tries "3", year 7, bad deadline, awards 0, no title): 400
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -151,7 +155,7 @@ Content-Type: application/json
 
 ### T-ADM-17 valid, with server-only fields in the body: 201 draft, acceptedCount 0, createdBy test-admin, new UUID (body values ignored)
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -170,11 +174,11 @@ Content-Type: application/json
 
 ### T-ADM-19 GET /api/admin/scholarships is not a route yet: through API Gateway 404 {"message":"Not Found"} (set @baseUrl = {{floci}})
 GET {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-20 deadline without time and zone: 400 (a bare date would silently mean midnight UTC)
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -189,7 +193,7 @@ Content-Type: application/json
 
 ### T-ADM-21 deadline that does not exist (30 February): 400, not rolled over to 2 March
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -204,7 +208,7 @@ Content-Type: application/json
 
 ### T-ADM-22 past deadline on a draft: 201 (allowed; publishing it will give 409 until the deadline is in the future)
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -219,7 +223,7 @@ Content-Type: application/json
 
 ### T-ADM-23 zone offset above +14:00 (or -00:00, "unknown local offset"): 400. +14:00 itself is accepted.
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -234,7 +238,7 @@ Content-Type: application/json
 
 ### T-ADM-24 29 February in a year that is not a leap year: 400 (2028-02-29 is accepted)
 POST {{baseUrl}}/api/admin/scholarships
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -259,21 +263,21 @@ Content-Type: application/json
 
 ### T-ADM-26 unknown id: 404 SCHOLARSHIP_NOT_FOUND (an id that is not a UUID: 400)
 PUT {{baseUrl}}/api/admin/scholarships/00000000-0000-4000-8000-000000000000
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {}
 
 ### T-ADM-27 wrong Content-Type: 415
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: text/plain
 
 published
 
 ### T-ADM-28 invalid edit (weights sum to 90): 400, the draft is unchanged
 PUT {{baseUrl}}/api/admin/scholarships/{{id}}
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -288,7 +292,7 @@ Content-Type: application/json
 
 ### T-ADM-29 valid edit of a draft: 200, status/acceptedCount/createdBy from the body ignored
 PUT {{baseUrl}}/api/admin/scholarships/{{id}}
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -304,42 +308,42 @@ Content-Type: application/json
 
 ### T-ADM-30 status that is not published/closed: 400
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "draft" }
 
 ### T-ADM-31 close a draft: 409
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "closed" }
 
 ### T-ADM-32 publish a draft whose deadline has passed: 409 (use a draft made by T-ADM-22)
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "published" }
 
 ### T-ADM-33 publish a valid draft: 200 published
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "published" }
 
 ### T-ADM-34 publish it again: 409 Only a draft can be published
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "published" }
 
 ### T-ADM-35 edit after publishing: 409 locked after publishing
 PUT {{baseUrl}}/api/admin/scholarships/{{id}}
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -354,7 +358,7 @@ Content-Type: application/json
 
 ### T-ADM-36 close a published scholarship: 200 closed (again, or publish, or PUT afterwards: 409)
 PATCH {{baseUrl}}/api/admin/scholarships/{{id}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "closed" }
@@ -378,42 +382,42 @@ Content-Type: application/json
 
 ### T-ADM-40 decision that is not accepted/rejected: 400 (unknown id: 404, text/plain: 415)
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "maybe" }
 
 ### T-ADM-41 application that is not reviewed yet: 409
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "rejected" }
 
 ### T-ADM-42 accept a flagged application: 409 A flagged application can only be rejected
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "accepted" }
 
 ### T-ADM-43 reject a flagged application: 200; the queue message carries the flag reason
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "rejected" }
 
 ### T-ADM-44 accept a reviewed application: 200 emailStatus queued, acceptedCount + 1
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "accepted" }
 
 ### T-ADM-45 decide it again: 409 already accepted (a decision is final)
 PATCH {{baseUrl}}/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "rejected" }
@@ -428,7 +432,7 @@ Content-Type: application/json
 # PORT=3099 NOTIFICATIONS_QUEUE_URL=http://localhost:4566/000000000000/queue-that-does-not-exist node src/server.js
 # Expected: 200 with "emailStatus": "failed"; the application stays accepted and the award stays taken.
 PATCH http://localhost:3099/api/admin/applications/{{app}}/decision
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "decision": "accepted" }
@@ -441,22 +445,22 @@ GET {{baseUrl}}/api/admin/users
 
 ### T-ADM-51 filters: only disabled reviewers (unknown role or status: 400)
 GET {{baseUrl}}/api/admin/users?role=reviewer&status=disabled
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-52 all users: never a passwordHash or temporaryPassword field
 GET {{baseUrl}}/api/admin/users
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-53 create a reviewer: 201 with temporaryPassword ONCE; role stays reviewer even though the body says admin
 POST {{baseUrl}}/api/admin/users
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "email": "new.reviewer@example.org", "name": "New Reviewer", "role": "admin" }
 
 ### T-ADM-54 same email again: 409 (invalid email or no name: 400, text/plain: 415)
 POST {{baseUrl}}/api/admin/users
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "email": "NEW.REVIEWER@example.org", "name": "Same Email" }
@@ -465,35 +469,35 @@ Content-Type: application/json
 
 ### T-ADM-56 disable your own account: 409
 PATCH {{baseUrl}}/api/admin/users/test-admin/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "disabled" }
 
 ### T-ADM-57 unknown user: 404 USER_NOT_FOUND (bad id or status: 400, already disabled: 409)
 PATCH {{baseUrl}}/api/admin/users/no-such-user/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "disabled" }
 
 ### T-ADM-58 disable a student or reviewer: 200 (send "active" to enable again)
 PATCH {{baseUrl}}/api/admin/users/{{user}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "disabled" }
 
 ### T-ADM-59 disable another admin while your own Users row is an active admin: 200
 PATCH {{baseUrl}}/api/admin/users/{{user}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "disabled" }
 
 ### T-ADM-60 same, while your own Users row is disabled: 409 (at least one active admin must remain)
 PATCH {{baseUrl}}/api/admin/users/{{user}}/status
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "disabled" }
@@ -509,25 +513,25 @@ GET {{baseUrl}}/api/admin/audit-log?action=decision
 
 ### T-ADM-64 unknown action: 400 (no action, bad since, limit outside 1-100, bad next: 400 too)
 GET {{baseUrl}}/api/admin/audit-log?action=bogus
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-65 one action since a time, newest first, only 5 fields per row
 GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&since=2026-11-27T00:00:00Z
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-66 paging: limit 2, then send the returned next value as &next=...
 GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&limit=2
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-67 the cap: limit=100 is the most one call returns
 GET {{baseUrl}}/api/admin/audit-log?action=scholarship_created&limit=100
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-68 no temp password, hash or token in the audit output: needs a created reviewer and the stored hash, only in tests/api-tests.sh
 
 ### T-ADM-69 stats: scholarships and applications counted by status
 GET {{baseUrl}}/api/admin/stats
-Authorization: Bearer test-admin
+Authorization: Bearer {{adminToken}}
 
 ### T-ADM-70 stats change by exactly the data added: needs seeded applications, only in tests/api-tests.sh
 

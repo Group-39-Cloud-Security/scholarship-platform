@@ -4,6 +4,88 @@ One section per service, written by its owner: data dictionary (Field · Type ·
 
 ## auth-service
 
+Shared component, built by Mohamed Wael (team decision 28 Nov). Lambda `auth-service`. Register and login need no token; `/me` and password change need `Authorization: Bearer <token>` (any role). Every response carries `Cache-Control: no-store` and the shared security headers. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Passwords and `passwordHash` are never returned, logged or audited.
+
+### Data dictionary: `Users` (one item per account)
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| userId | string (UUID) | Server | `crypto.randomUUID()` |
+| email | string | Client | trimmed, lowercased, valid address, at most 254 characters; register: domain in `ALLOWED_DOMAINS`, not already used (409) |
+| name | string | Client | 2-60 characters after trimming |
+| role | `student` / `reviewer` / `admin` | Server | register always makes `student`; reviewers come from admin-service, the first admin from `seed.sh` |
+| status | `active` / `disabled` | Server | `active` on register; admin-service changes it |
+| passwordHash | string | Server | bcryptjs, cost 10. The password itself: at least 10 characters, at most 72 bytes, not found in Pwned Passwords |
+| mustChangePassword | boolean | Server | `false` on register, `true` for reviewers created by an admin |
+| createdAt | string (ISO 8601 UTC) | Server | time of creation |
+
+### Data dictionary: `LoginAttempts` (one item per email + source IP)
+
+| Field | Type | Source | Rule |
+|---|---|---|---|
+| emailIp | string | Server | `<email>#<ip>`, the IP from API Gateway's `requestContext.http.sourceIp`, never `X-Forwarded-For` |
+| failures | number | Server | +1 per failed login (atomic `ADD`), 0 after a success |
+| blockedUntil | string (ISO 8601 UTC) | Server | after the 5th failure: now + 1 min, then 2, 4, 8, at most 15 min; removed after a success |
+| expiresAt | number (epoch seconds) | Server | now + 24 h on every failure; DynamoDB TTL deletes the row after it |
+
+### POST /api/auth/register  [anyone, no token]
+```json
+{ "email": "student1@example-university.edu", "name": "Student One", "password": "a long passphrase" }
+```
+`201`, the new account (never the password or its hash):
+```json
+{ "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false, "createdAt": "2026-11-28T10:00:00.000Z" }
+```
+`role`, `status` or `userId` in the body are ignored. Writes a `user_created` audit row (detail `student registered`).
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | bad JSON, invalid email, name not 2-60, password shorter than 10 or longer than 72 bytes, email outside `ALLOWED_DOMAINS`, password found in Pwned Passwords |
+| 409 | `CONFLICT` | an account with this email already exists |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+
+Pwned Passwords: only the first 5 hex characters of the password's SHA-1 are sent (k-anonymity, `Add-Padding`), 5 s timeout. If the API can't be reached the password is allowed and a `pwned_check_unavailable` warn line is logged (fails open, docs/decisions.md).
+
+### POST /api/auth/login  [anyone, no token]
+```json
+{ "email": "student1@example-university.edu", "password": "a long passphrase" }
+```
+`200`:
+```json
+{ "token": "eyJhbGciOiJIUzI1NiIs...", "user": { "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false } }
+```
+The token is a JWT, HS256, valid 1 hour, signed with `/scholarship/jwt-secret` (SSM). It holds only `sub` (userId), `role`, `iat`, `exp`; the backend never trusts the role in it and re-reads the user from `Users` on every request. Writes a `login` audit row.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | bad JSON, invalid email, password missing |
+| 401 | `UNAUTHENTICATED` | "Email or password is incorrect." for an unknown email, a wrong password and a disabled account alike (same body; unknown emails still pay for one bcrypt compare). Counts a failure, writes a `login_failed` audit row (detail: failure count and IP) and a request log line with `"action":"login_failed"` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+| 429 | `TOO_MANY_ATTEMPTS` | this email + IP is blocked (see `LoginAttempts`); the password is not checked, `Retry-After` gives the seconds left. Logged as `"action":"login_blocked"`, no audit row (a flood of blocked guesses can't flood `AuditLog`) |
+
+### GET /api/auth/me  [any logged-in user]
+`200`, the caller's own account (works while `mustChangePassword` is true):
+```json
+{ "userId": "8f1c...", "email": "student1@example-university.edu", "name": "Student One", "role": "student", "status": "active", "mustChangePassword": false }
+```
+`401 UNAUTHENTICATED`: no, malformed, badly signed or expired token, unknown or disabled user.
+
+### PUT /api/auth/password  [any logged-in user]
+```json
+{ "currentPassword": "the old one", "newPassword": "a new long passphrase" }
+```
+`200`, the account with `mustChangePassword: false`. Writes a `password_changed` audit row. The only other route a user with `mustChangePassword: true` can call besides `GET /me`.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | current password missing or wrong ("Current password is incorrect."; 400, not 401, so the page does not log out), new password shorter than 10 or longer than 72 bytes, same as the current one, or found in Pwned Passwords. A wrong current password counts against the same email + IP backoff as login and is logged and audited as `login_failed` |
+| 401 | `UNAUTHENTICATED` | no or bad token |
+| 409 | `CONFLICT` | the password was changed or the account disabled at the same moment (conditional update on the checked hash) |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | body is not `application/json` |
+| 429 | `TOO_MANY_ATTEMPTS` | this email + IP is blocked; `Retry-After` gives the seconds left |
+
+Limitation: tokens issued before a password change stay valid until they expire (at most 1 hour); there is no token revocation list.
+
 ## application-service
 
 Owner: Mohamed Khalil. Lambda `application-service`. Every route needs `Authorization: Bearer <token>`; the allowed role is in brackets. Errors use the shared shape `{ "error": { "code": "...", "message": "..." } }`. Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'`.
@@ -468,7 +550,7 @@ Email (SQS `notifications`, consumed by `notification-sender`):
 `400` id not a UUID, `decision` not `accepted`/`rejected`, bad JSON, `401`, `403`, `404 APPLICATION_NOT_FOUND`, `409` (not reviewed, already decided, flagged accept, awards limit reached, scholarship missing), `415`
 
 ### Users (account management)
-`Users` belongs to the shared auth-service (§1, §5); admin-service only manages accounts in it. On Floci the table is a local test fixture in admin-service's deploy.sh until auth-service creates it. `passwordHash` is never read back or returned: every read names its fields, and responses only ever contain `userId, email, name, role, status, mustChangePassword, createdAt`.
+`Users` belongs to the shared auth-service (§1, §5); admin-service only manages accounts in it. auth-service's deploy.sh creates the table. `passwordHash` is never read back or returned: every read names its fields, and responses only ever contain `userId, email, name, role, status, mustChangePassword, createdAt`.
 
 ### GET /api/admin/users?role=&status=  [admin]
 Both filters optional: `role` one of `student`, `reviewer`, `admin`; `status` one of `active`, `disabled` (anything else → `400`). Sorted by email.
@@ -514,7 +596,7 @@ Rules (§6 Accounts):
 `400` id invalid or status not `active`/`disabled`, `401`, `403`, `404 USER_NOT_FOUND`, `409`, `415`
 
 ### GET /api/admin/audit-log?action=&since=&limit=&next=  [admin]
-- `action` (required): one of `login`, `login_failed`, `forbidden`, `claim`, `claim_expired`, `release`, `review`, `pdf_download`, `scholarship_created`, `scholarship_updated`, `scholarship_published`, `scholarship_closed`, `decision`, `user_created`, `user_disabled`, `user_enabled`. It is the table's partition key, so every call is one Query, never a Scan. **A service that writes a new action must add it to this list** (`src/controllers/audit.js`).
+- `action` (required): one of `login`, `login_failed`, `password_changed`, `forbidden`, `claim`, `claim_expired`, `release`, `review`, `pdf_download`, `scholarship_created`, `scholarship_updated`, `scholarship_published`, `scholarship_closed`, `decision`, `user_created`, `user_disabled`, `user_enabled`, `email_sent`, `email_failed`. It is the table's partition key, so every call is one Query, never a Scan. **A service that writes a new action must add it to this list** (`src/controllers/audit.js`).
 - `since` (optional): a full ISO 8601 date-time with a zone, same rules as a deadline. Rows with `createdAt` >= since.
 - `limit` (optional): 1-100, default 50. 100 is a hard cap per call.
 - `next` (optional): the `next` value from the previous page. Only accepted for the same `action`.

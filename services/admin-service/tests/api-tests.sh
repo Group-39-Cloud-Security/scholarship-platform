@@ -34,6 +34,18 @@ GIT_ROOT="$(winpath "$ROOT")" # vars.sh sets MSYS_NO_PATHCONV, so git.exe needs 
 echo "Code:    $(git -C "$GIT_ROOT" rev-parse --short HEAD)$(git -C "$GIT_ROOT" diff --quiet -- services/admin-service 2>/dev/null || echo ' + uncommitted changes in services/admin-service')"
 echo
 
+# Phase B: real tokens for the seeded admin, student1 and reviewer1 (platform/seed.sh, passwords in platform/.env),
+# logged in through auth-service on the gateway even for the local run (the local server checks them with the same
+# secret from SSM). ADMIN_ID is the seeded admin's userId (createdBy, decidedBy and the audit rows carry it).
+AUTH_URL=$(source "$ROOT/platform/vars.sh" >/dev/null; echo "$API_URL")
+ADMIN=$(bash "$ROOT/platform/get-token.sh" admin) && STUDENT=$(bash "$ROOT/platform/get-token.sh" student) \
+  && REVIEWER=$(bash "$ROOT/platform/get-token.sh" reviewer) \
+  || { echo "Could not log in the seeded users: run platform/seed.sh (and check platform/.env)."; exit 1; }
+ADMIN_ID=$(curl -s -H "Authorization: Bearer $ADMIN" "$AUTH_URL/api/auth/me" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).userId||"")}catch{}})')
+[ -n "$ADMIN_ID" ] || { echo "GET /api/auth/me failed for the seeded admin."; exit 1; }
+export ADMIN_ID
+
 TMP="$(mktemp -d)"
 SENDER_ENV_SWAPPED=no # set by the notification-sender tests; the trap puts the Lambda's settings back if the run dies
 restore_sender_env() { :; }
@@ -52,7 +64,13 @@ set_trigger() { # enabled | disabled
     AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws lambda update-event-source-mapping --uuid "$id" --enabled >/dev/null && TRIGGER_OFF=no
   fi
 }
-trap 'restore_sender_env; [ "$TRIGGER_OFF" = yes ] && set_trigger enabled; rm -rf "$TMP"' EXIT
+SEEDED_USERS=() # test users this run puts in Users (incl. its own admins); deleted at the end, or here if the run dies
+delete_seeded_users() {
+  for u in "${SEEDED_USERS[@]}"; do
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Users --key "{\"userId\":{\"S\":\"$u\"}}"
+  done
+}
+trap 'restore_sender_env; [ "$TRIGGER_OFF" = yes ] && set_trigger enabled; delete_seeded_users; rm -rf "$TMP"' EXIT
 BODY="$(winpath "$TMP/body")"
 HDRS="$(winpath "$TMP/headers")"
 PASS=0; FAIL=0; SKIP=0; STATUS=""
@@ -107,7 +125,7 @@ call GET /api/admin/nope ""
 if [ $GATEWAY = yes ]; then expect T-ADM-02 "unknown route stopped by API Gateway" 404 '"message":"Not Found"'
 else expect T-ADM-02 "unknown route (local: Express fallback)" 404 ROUTE_NOT_FOUND; fi
 
-call POST $S test-admin '{bad'
+call POST $S "$ADMIN" '{bad'
 expect T-ADM-03 "bad JSON" 400 "Request body is not valid JSON."
 
 call GET /api/health "" "" application/json "Origin: http://localhost:4566"
@@ -135,9 +153,9 @@ result T-ADM-07 "security headers (nosniff, DENY, CSP, no-store, no X-Powered-By
 call POST $S "" "$VALID"
 expect T-ADM-08 "no token" 401 UNAUTHENTICATED
 
-call POST $S test-student-1 "$VALID"
+call POST $S "$STUDENT" "$VALID"
 expect T-ADM-09 "student token" 403 FORBIDDEN
-call POST $S test-reviewer "$VALID"
+call POST $S "$REVIEWER" "$VALID"
 expect T-ADM-09 "reviewer token" 403 FORBIDDEN
 if [ $HAVE_AWS = yes ]; then
   STATUS="AuditLog $FORBIDDEN_BEFORE -> $(count_forbidden)"
@@ -145,53 +163,53 @@ if [ $HAVE_AWS = yes ]; then
   result T-ADM-09 "both 403s written to AuditLog as forbidden with the full path" $ok
 else skip T-ADM-09 "forbidden rows in AuditLog" "no AWS CLI"; fi
 
-call POST $S test-admin "$VALID" text/plain
+call POST $S "$ADMIN" "$VALID" text/plain
 expect T-ADM-10 "Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
 
 # ---------- validation (each must be 400 and write nothing) ----------
 [ $HAVE_AWS = yes ] && COUNT_BEFORE=$(count_scholarships)
 
-call POST $S test-admin "$(with 'b=>b.rubric[2].weight=10')"
+call POST $S "$ADMIN" "$(with 'b=>b.rubric[2].weight=10')"
 expect T-ADM-11 "rubric weights sum to 90" 400 "Rubric weights must sum to 100 (they sum to 90)."
-call POST $S test-admin "$(with 'b=>b.rubric[0].weight=4.5')"
+call POST $S "$ADMIN" "$(with 'b=>b.rubric[0].weight=4.5')"
 expect T-ADM-12 "rubric weight 4.5" 400 "whole number"
-call POST $S test-admin "$(with 'b=>b.rubric[0].weight="40"')"
+call POST $S "$ADMIN" "$(with 'b=>b.rubric[0].weight="40"')"
 expect T-ADM-12 "rubric weight \"40\" as text" 400 "whole number"
-call POST $S test-admin "$(with 'b=>{b.rubric=[{...b.rubric[0],weight:100}]}')"
+call POST $S "$ADMIN" "$(with 'b=>{b.rubric=[{...b.rubric[0],weight:100}]}')"
 expect T-ADM-13 "rubric with 1 criterion" 400 "between 2 and 6"
-call POST $S test-admin "$(with 'b=>{b.rubric=Array.from({length:7},(_,i)=>({criterionId:"c"+i,name:"Name"+i,description:"Desc",weight:i<6?14:16}))}')"
+call POST $S "$ADMIN" "$(with 'b=>{b.rubric=Array.from({length:7},(_,i)=>({criterionId:"c"+i,name:"Name"+i,description:"Desc",weight:i<6?14:16}))}')"
 expect T-ADM-13 "rubric with 7 criteria" 400 "between 2 and 6"
-call POST $S test-admin "$(with 'b=>b.rubric[1].criterionId="academic"')"
+call POST $S "$ADMIN" "$(with 'b=>b.rubric[1].criterionId="academic"')"
 expect T-ADM-14 "criterionId used twice" 400 "used twice"
-call POST $S test-admin "$(with 'b=>b.rubric[0].criterionId="Has Space"')"
+call POST $S "$ADMIN" "$(with 'b=>b.rubric[0].criterionId="Has Space"')"
 expect T-ADM-14 "criterionId with a space" 400 "criterionId must be"
-call POST $S test-admin "$(with 'b=>b.eligibility.allowedDomains=["bue.edu.eg"]')"
+call POST $S "$ADMIN" "$(with 'b=>b.eligibility.allowedDomains=["bue.edu.eg"]')"
 expect T-ADM-15 "domain that is not a partner university" 400 "not a partner university"
-call POST $S test-admin "$(with 'b=>b.eligibility.minGpa=5')"
+call POST $S "$ADMIN" "$(with 'b=>b.eligibility.minGpa=5')"
 expect T-ADM-16 "minGpa 5" 400 "Minimum GPA must be between 0 and 4"
-call POST $S test-admin "$(with 'b=>b.eligibility.minGpa="3"')"
+call POST $S "$ADMIN" "$(with 'b=>b.eligibility.minGpa="3"')"
 expect T-ADM-16 "minGpa \"3\" as text" 400 "must be a number"
-call POST $S test-admin "$(with 'b=>b.eligibility.years=[7]')"
+call POST $S "$ADMIN" "$(with 'b=>b.eligibility.years=[7]')"
 expect T-ADM-16 "year of study 7" 400 "Year of study"
-call POST $S test-admin "$(with 'b=>b.deadline="next friday"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="next friday"')"
 expect T-ADM-16 "deadline \"next friday\"" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.awards=0')"
+call POST $S "$ADMIN" "$(with 'b=>b.awards=0')"
 expect T-ADM-16 "awards 0" 400 "Awards"
-call POST $S test-admin "$(with 'b=>delete b.title')"
+call POST $S "$ADMIN" "$(with 'b=>delete b.title')"
 expect T-ADM-16 "no title" 400 "Title"
-call POST $S test-admin '[]'
+call POST $S "$ADMIN" '[]'
 expect T-ADM-16 "body is an array" 400 "JSON object"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-01-15"')"
 expect T-ADM-20 "deadline without time and zone" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-02-30T10:00:00Z"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-02-30T10:00:00Z"')"
 expect T-ADM-21 "deadline 30 February" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-04-31T10:00:00Z"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-04-31T10:00:00Z"')"
 expect T-ADM-21 "deadline 31 April" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:30"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:30"')"
 expect T-ADM-23 "zone offset +14:30 (above the 14:00 maximum)" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00-00:00"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-01-15T23:59:00-00:00"')"
 expect T-ADM-23 "zone offset -00:00 (unknown local offset)" 400 "ISO 8601"
-call POST $S test-admin "$(with 'b=>b.deadline="2027-02-29T12:00:00Z"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-02-29T12:00:00Z"')"
 expect T-ADM-24 "29 February in 2027 (not a leap year)" 400 "ISO 8601"
 
 if [ $HAVE_AWS = yes ]; then
@@ -201,41 +219,41 @@ if [ $HAVE_AWS = yes ]; then
 else skip T-ADM-18 "no item written on 400" "no AWS CLI"; fi
 
 # ---------- valid creates ----------
-call POST $S test-admin "$(with 'b=>Object.assign(b,{status:"published",acceptedCount:99,createdBy:"hacker",scholarshipId:"chosen-by-client"})')"
+call POST $S "$ADMIN" "$(with 'b=>Object.assign(b,{status:"published",acceptedCount:99,createdBy:"hacker",scholarshipId:"chosen-by-client"})')"
 expect T-ADM-17 "valid draft" 201 '"status":"draft"'
 node -e '
 const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const bad = [];
 if (s.status !== "draft") bad.push("status");
 if (s.acceptedCount !== 0) bad.push("acceptedCount");
-if (s.createdBy !== "test-admin") bad.push("createdBy");
+if (s.createdBy !== process.env.ADMIN_ID) bad.push("createdBy");
 if (!/^[0-9a-f-]{36}$/.test(s.scholarshipId || "")) bad.push("scholarshipId");
 if (s.deadline !== "2027-01-15T23:59:00.000Z") bad.push("deadline");
 if (JSON.stringify(s.eligibility) !== JSON.stringify({allowedDomains:["example-university.edu"],minGpa:3,years:[2,3]})) bad.push("eligibility");
 process.exit(bad.length ? 1 : 0);' "$BODY" && ok=ok || ok=no
 result T-ADM-17 "body values for status, acceptedCount, createdBy, id ignored; deadline UTC; eligibility cleaned" $ok
 
-call POST $S test-admin "$(with 'b=>b.deadline="2020-01-01T00:00:00Z"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2020-01-01T00:00:00Z"')"
 expect T-ADM-22 "draft with a past deadline is allowed (future only checked at publish)" 201 '"deadline":"2020-01-01T00:00:00.000Z"'
 
-call POST $S test-admin "$(with 'b=>b.deadline="2027-01-16T01:59:00+02:00"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-01-16T01:59:00+02:00"')"
 expect T-ADM-22 "deadline with +02:00 stored in UTC" 201 '"deadline":"2027-01-15T23:59:00.000Z"'
 
-call POST $S test-admin "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:00"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2027-01-15T23:59:00+14:00"')"
 expect T-ADM-23 "zone offset +14:00 (the maximum) accepted, stored in UTC" 201 '"deadline":"2027-01-15T09:59:00.000Z"'
 
-call POST $S test-admin "$(with 'b=>b.deadline="2028-02-29T12:00:00Z"')"
+call POST $S "$ADMIN" "$(with 'b=>b.deadline="2028-02-29T12:00:00Z"')"
 expect T-ADM-24 "29 February 2028 (a leap year) accepted" 201 '"deadline":"2028-02-29T12:00:00.000Z"'
 
 # ---------- routes that are not listed ----------
 if [ $GATEWAY = yes ]; then
-  call GET $S test-admin
+  call GET $S "$ADMIN"
   expect T-ADM-19 "GET /api/admin/scholarships is not a route yet: stopped by API Gateway" 404 '"message":"Not Found"'
 else skip T-ADM-19 "route not listed in API Gateway" "only through API Gateway"; fi
 
 # ---------- PUT /api/admin/scholarships/{id} and PATCH .../status (step 4) ----------
 # new_draft [JS change]: creates a draft (optionally changed) and prints its id
 new_draft() {
-  call POST $S test-admin "$(with "${1:-b=>b}")"
+  call POST $S "$ADMIN" "$(with "${1:-b=>b}")"
   node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scholarshipId||"")' "$BODY"
 }
 field() { # $1 id, $2 attribute: prints the stored value (S or N) straight from DynamoDB
@@ -254,26 +272,26 @@ UNKNOWN=00000000-0000-4000-8000-000000000000
 D=$(new_draft)
 call PUT $S/$D "" "$VALID"
 expect T-ADM-25 "PUT, no token" 401 UNAUTHENTICATED
-call PUT $S/$D test-student-1 "$VALID"
+call PUT $S/$D "$STUDENT" "$VALID"
 expect T-ADM-25 "PUT, student token" 403 FORBIDDEN
 call PATCH $S/$D/status "" "$PUB"
 expect T-ADM-25 "PATCH status, no token" 401 UNAUTHENTICATED
-call PATCH $S/$D/status test-reviewer "$PUB"
+call PATCH $S/$D/status "$REVIEWER" "$PUB"
 expect T-ADM-25 "PATCH status, reviewer token" 403 FORBIDDEN
 
-call PUT $S/not-a-uuid test-admin "$VALID"
+call PUT $S/not-a-uuid "$ADMIN" "$VALID"
 expect T-ADM-26 "PUT with an id that is not a UUID" 400 "Scholarship id"
-call PUT $S/$UNKNOWN test-admin "$VALID"
+call PUT $S/$UNKNOWN "$ADMIN" "$VALID"
 expect T-ADM-26 "PUT unknown id" 404 SCHOLARSHIP_NOT_FOUND
-call PATCH $S/$UNKNOWN/status test-admin "$PUB"
+call PATCH $S/$UNKNOWN/status "$ADMIN" "$PUB"
 expect T-ADM-26 "PATCH status unknown id" 404 SCHOLARSHIP_NOT_FOUND
 
-call PUT $S/$D test-admin "$VALID" text/plain
+call PUT $S/$D "$ADMIN" "$VALID" text/plain
 expect T-ADM-27 "PUT with Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
-call PATCH $S/$D/status test-admin "$PUB" text/plain
+call PATCH $S/$D/status "$ADMIN" "$PUB" text/plain
 expect T-ADM-27 "PATCH status with Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
 
-call PUT $S/$D test-admin "$(with 'b=>{b.title="Changed title";b.rubric[2].weight=10}')"
+call PUT $S/$D "$ADMIN" "$(with 'b=>{b.title="Changed title";b.rubric[2].weight=10}')"
 expect T-ADM-28 "PUT with weights summing to 90" 400 "sum to 100"
 if [ $HAVE_AWS = yes ]; then
   STATUS="stored title: $(field "$D" title)"
@@ -282,11 +300,11 @@ if [ $HAVE_AWS = yes ]; then
 else skip T-ADM-28 "invalid PUT changed nothing" "no AWS CLI"; fi
 
 [ $HAVE_AWS = yes ] && UPDATED_BEFORE=$(count_action scholarship_updated)
-call PUT $S/$D test-admin "$(with 'b=>Object.assign(b,{title:"Cloud Award 2027",awards:3,status:"published",acceptedCount:5,createdBy:"hacker"})')"
+call PUT $S/$D "$ADMIN" "$(with 'b=>Object.assign(b,{title:"Cloud Award 2027",awards:3,status:"published",acceptedCount:5,createdBy:"hacker"})')"
 expect T-ADM-29 "PUT valid on a draft" 200 '"title":"Cloud Award 2027"'
 node -e '
 const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-process.exit(s.status === "draft" && s.acceptedCount === 0 && s.createdBy === "test-admin" && s.awards === 3 ? 0 : 1);' "$BODY" && ok=ok || ok=no
+process.exit(s.status === "draft" && s.acceptedCount === 0 && s.createdBy === process.env.ADMIN_ID && s.awards === 3 ? 0 : 1);' "$BODY" && ok=ok || ok=no
 result T-ADM-29 "PUT replaced the fields, ignored status/acceptedCount/createdBy from the body" $ok
 if [ $HAVE_AWS = yes ]; then
   STATUS="AuditLog scholarship_updated $UPDATED_BEFORE -> $(count_action scholarship_updated)"
@@ -295,15 +313,15 @@ if [ $HAVE_AWS = yes ]; then
 else skip T-ADM-29 "scholarship_updated row in AuditLog" "no AWS CLI"; fi
 
 for bad in '{"status":"draft"}' '{"status":"open"}' '{}'; do
-  call PATCH $S/$D/status test-admin "$bad"
+  call PATCH $S/$D/status "$ADMIN" "$bad"
   expect T-ADM-30 "PATCH status $bad" 400 "Status must be one of"
 done
 
-call PATCH $S/$D/status test-admin "$CLOSE"
+call PATCH $S/$D/status "$ADMIN" "$CLOSE"
 expect T-ADM-31 "close a draft" 409 "Only a published scholarship can be closed"
 
 P=$(new_draft 'b=>b.deadline="2020-01-01T00:00:00Z"')
-call PATCH $S/$P/status test-admin "$PUB"
+call PATCH $S/$P/status "$ADMIN" "$PUB"
 expect T-ADM-32 "publish a draft whose deadline has passed" 409 "deadline has passed"
 if [ $HAVE_AWS = yes ]; then
   STATUS="stored status: $(field "$P" status)"
@@ -312,7 +330,7 @@ if [ $HAVE_AWS = yes ]; then
 else skip T-ADM-32 "still a draft" "no AWS CLI"; fi
 
 [ $HAVE_AWS = yes ] && PUBLISHED_BEFORE=$(count_action scholarship_published)
-call PATCH $S/$D/status test-admin "$PUB"
+call PATCH $S/$D/status "$ADMIN" "$PUB"
 expect T-ADM-33 "publish a valid draft" 200 '"status":"published"'
 if [ $HAVE_AWS = yes ]; then
   STATUS="AuditLog scholarship_published $PUBLISHED_BEFORE -> $(count_action scholarship_published)"
@@ -320,10 +338,10 @@ if [ $HAVE_AWS = yes ]; then
   result T-ADM-33 "publish written to AuditLog" $ok
 else skip T-ADM-33 "publish written to AuditLog" "no AWS CLI"; fi
 
-call PATCH $S/$D/status test-admin "$PUB"
+call PATCH $S/$D/status "$ADMIN" "$PUB"
 expect T-ADM-34 "publish again" 409 "Only a draft can be published (this scholarship is published)"
 
-call PUT $S/$D test-admin "$(with 'b=>b.title="Edited after publish"')"
+call PUT $S/$D "$ADMIN" "$(with 'b=>b.title="Edited after publish"')"
 expect T-ADM-35 "PUT on a published scholarship" 409 "locked after publishing"
 if [ $HAVE_AWS = yes ]; then
   STATUS="stored title: $(field "$D" title)"
@@ -332,25 +350,25 @@ if [ $HAVE_AWS = yes ]; then
 else skip T-ADM-35 "published scholarship unchanged" "no AWS CLI"; fi
 
 [ $HAVE_AWS = yes ] && CLOSED_BEFORE=$(count_action scholarship_closed)
-call PATCH $S/$D/status test-admin "$CLOSE"
+call PATCH $S/$D/status "$ADMIN" "$CLOSE"
 expect T-ADM-36 "close a published scholarship" 200 '"status":"closed"'
 if [ $HAVE_AWS = yes ]; then
   STATUS="AuditLog scholarship_closed $CLOSED_BEFORE -> $(count_action scholarship_closed)"
   [ "$(count_action scholarship_closed)" -eq $((CLOSED_BEFORE + 1)) ] && ok=ok || ok=no
   result T-ADM-36 "exactly one scholarship_closed row added" $ok
 else skip T-ADM-36 "scholarship_closed row in AuditLog" "no AWS CLI"; fi
-call PATCH $S/$D/status test-admin "$CLOSE"
+call PATCH $S/$D/status "$ADMIN" "$CLOSE"
 expect T-ADM-36 "close it again" 409 "Only a published scholarship can be closed"
-call PATCH $S/$D/status test-admin "$PUB"
+call PATCH $S/$D/status "$ADMIN" "$PUB"
 expect T-ADM-36 "publish a closed scholarship" 409 "Only a draft can be published (this scholarship is closed)"
-call PUT $S/$D test-admin "$VALID"
+call PUT $S/$D "$ADMIN" "$VALID"
 expect T-ADM-36 "PUT on a closed scholarship" 409 "locked after publishing"
 
 # Five publishes of the same draft at the same time: the conditional write lets exactly one win.
 # One output file per request: parallel appends to a single file can lose lines on Windows (Git Bash).
 R=$(new_draft)
 for i in 1 2 3 4 5; do
-  curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+  curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H "Authorization: Bearer $ADMIN" \
     -H 'Content-Type: application/json' --data "$PUB" "$API_URL$S/$R/status" > "$TMP/race-$i" &
 done
 wait
@@ -384,9 +402,9 @@ if [ $HAVE_AWS = yes ]; then
   put_raw_draft "$BAD_RUBRIC" 2 10     # awards fine, weights 40 + 40 + 10 = 90
   PUBLISHED_BEFORE=$(count_action scholarship_published)
 
-  call PATCH $S/$BAD_AWARDS/status test-admin "$PUB"
+  call PATCH $S/$BAD_AWARDS/status "$ADMIN" "$PUB"
   expect T-ADM-38 "publish a stored draft with awards 0" 409 "Awards must be at least 1"
-  call PATCH $S/$BAD_RUBRIC/status test-admin "$PUB"
+  call PATCH $S/$BAD_RUBRIC/status "$ADMIN" "$PUB"
   expect T-ADM-38 "publish a stored draft whose weights sum to 90" 409 "rubric is not valid"
 
   STATUS="status $(field "$BAD_AWARDS" status) / $(field "$BAD_RUBRIC" status), scholarship_published $PUBLISHED_BEFORE -> $(count_action scholarship_published)"
@@ -407,7 +425,7 @@ DEC=/api/admin/applications
 uuid() { node -e 'process.stdout.write(require("crypto").randomUUID())'; }
 published_scholarship() { # $1 awards: creates and publishes a scholarship, prints its id
   local id; id=$(new_draft "b=>b.awards=$1")
-  call PATCH $S/$id/status test-admin "$PUB"
+  call PATCH $S/$id/status "$ADMIN" "$PUB"
   echo "$id"
 }
 SEEDED_APPS=(); SEEDED_REVIEWS=()
@@ -456,40 +474,40 @@ if [ $HAVE_AWS = yes ]; then
 
   call PATCH $DEC/$A_OK/decision "" "$ACC"
   expect T-ADM-39 "decision, no token" 401 UNAUTHENTICATED
-  call PATCH $DEC/$A_OK/decision test-student-1 "$ACC"
+  call PATCH $DEC/$A_OK/decision "$STUDENT" "$ACC"
   expect T-ADM-39 "decision, student token" 403 FORBIDDEN
-  call PATCH $DEC/$A_OK/decision test-reviewer "$ACC"
+  call PATCH $DEC/$A_OK/decision "$REVIEWER" "$ACC"
   expect T-ADM-39 "decision, reviewer token" 403 FORBIDDEN
 
-  call PATCH $DEC/not-a-uuid/decision test-admin "$ACC"
+  call PATCH $DEC/not-a-uuid/decision "$ADMIN" "$ACC"
   expect T-ADM-40 "id that is not a UUID" 400 "Application id"
-  call PATCH $DEC/$UNKNOWN/decision test-admin "$ACC"
+  call PATCH $DEC/$UNKNOWN/decision "$ADMIN" "$ACC"
   expect T-ADM-40 "unknown application" 404 APPLICATION_NOT_FOUND
-  call PATCH $DEC/$A_OK/decision test-admin "$ACC" text/plain
+  call PATCH $DEC/$A_OK/decision "$ADMIN" "$ACC" text/plain
   expect T-ADM-40 "Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
   for bad in '{"decision":"maybe"}' '{"decision":"reviewed"}' '{}'; do
-    call PATCH $DEC/$A_OK/decision test-admin "$bad"
+    call PATCH $DEC/$A_OK/decision "$ADMIN" "$bad"
     expect T-ADM-40 "decision $bad" 400 "Decision must be one of"
   done
 
-  call PATCH $DEC/$A_SUB/decision test-admin "$REJ"
+  call PATCH $DEC/$A_SUB/decision "$ADMIN" "$REJ"
   expect T-ADM-41 "decide a submitted application" 409 "Only a reviewed application can be decided"
-  call PATCH $DEC/$A_UNDER/decision test-admin "$ACC"
+  call PATCH $DEC/$A_UNDER/decision "$ADMIN" "$ACC"
   expect T-ADM-41 "decide an application under review" 409 "Only a reviewed application can be decided"
 
-  call PATCH $DEC/$A_FLAG/decision test-admin "$ACC"
+  call PATCH $DEC/$A_FLAG/decision "$ADMIN" "$ACC"
   expect T-ADM-42 "accept a flagged application" 409 "A flagged application can only be rejected"
   STATUS="acceptedCount $(field "$SCH" acceptedCount), status $(app_field "$A_FLAG" status)"
   [ "$(field "$SCH" acceptedCount)" = 0 ] && [ "$(app_field "$A_FLAG" status)" = reviewed ] && ok=ok || ok=no
   result T-ADM-42 "refused accept took no award and changed nothing" $ok
 
   DECISIONS_BEFORE=$(count_action decision)
-  call PATCH $DEC/$A_FLAG/decision test-admin "$REJ"
+  call PATCH $DEC/$A_FLAG/decision "$ADMIN" "$REJ"
   expect T-ADM-43 "reject a flagged application" 200 '"status":"rejected"'
-  call PATCH $DEC/$A_OK/decision test-admin "$ACC"
+  call PATCH $DEC/$A_OK/decision "$ADMIN" "$ACC"
   expect T-ADM-44 "accept a reviewed application" 200 '"emailStatus":"queued"'
   STATUS="status $(app_field "$A_OK" status), decidedBy $(app_field "$A_OK" decidedBy), emailStatus $(app_field "$A_OK" emailStatus), acceptedCount $(field "$SCH" acceptedCount)"
-  [ "$(app_field "$A_OK" status)" = accepted ] && [ "$(app_field "$A_OK" decidedBy)" = test-admin ] \
+  [ "$(app_field "$A_OK" status)" = accepted ] && [ "$(app_field "$A_OK" decidedBy)" = "$ADMIN_ID" ] \
     && [ "$(app_field "$A_OK" emailStatus)" = queued ] && [ "$(field "$SCH" acceptedCount)" = 1 ] && ok=ok || ok=no
   result T-ADM-44 "stored: accepted, decidedBy from token, emailStatus queued, acceptedCount 1" $ok
   STATUS="AuditLog decision $DECISIONS_BEFORE -> $(count_action decision)"
@@ -511,7 +529,7 @@ const m = JSON.parse(process.argv[1] || "{}");
 process.exit(Object.keys(m).sort().join(",") === "applicationId,decision,scholarshipTitle,studentEmail" && m.decision === "accepted" ? 0 : 1);' "$MSG_OK" && ok=ok || ok=no
   result T-ADM-44 "queue message: 4 fields, decision accepted, no flagReason" $ok
 
-  call PATCH $DEC/$A_OK/decision test-admin "$REJ"
+  call PATCH $DEC/$A_OK/decision "$ADMIN" "$REJ"
   expect T-ADM-45 "decide again after accepting" 409 "already accepted"
   STATUS="acceptedCount $(field "$SCH" acceptedCount), status $(app_field "$A_OK" status)"
   [ "$(field "$SCH" acceptedCount)" = 1 ] && [ "$(app_field "$A_OK" status)" = accepted ] && ok=ok || ok=no
@@ -522,7 +540,7 @@ process.exit(Object.keys(m).sort().join(",") === "applicationId,decision,scholar
   L1=$(uuid); L2=$(uuid); L3=$(uuid)
   for a in $L1 $L2 $L3; do seed_app "$a" "$LIM" reviewed false; done
   for a in $L1 $L2 $L3; do
-    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H "Authorization: Bearer $ADMIN" \
       -H 'Content-Type: application/json' --data "$ACC" "$API_URL$DEC/$a/decision" > "$TMP/lim-$a" &
   done
   wait
@@ -538,7 +556,7 @@ process.exit(Object.keys(m).sort().join(",") === "applicationId,decision,scholar
   RB=$(published_scholarship 5)
   RA=$(uuid); seed_app "$RA" "$RB" reviewed false
   for i in 1 2 3 4 5; do
-    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H 'Authorization: Bearer test-admin' \
+    curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -H "Authorization: Bearer $ADMIN" \
       -H 'Content-Type: application/json' --data "$ACC" "$API_URL$DEC/$RA/decision" > "$TMP/rb-$i" &
   done
   wait
@@ -561,7 +579,7 @@ process.exit(Object.keys(m).sort().join(",") === "applicationId,decision,scholar
     BAD_PID=$!
     for _ in $(seq 1 30); do curl -s -o /dev/null http://localhost:3099/api/health && break; node -e "setTimeout(()=>{},300)"; done
     SAVED_URL=$API_URL; API_URL=http://localhost:3099
-    call PATCH $DEC/$EA/decision test-admin "$ACC"
+    call PATCH $DEC/$EA/decision "$ADMIN" "$ACC"
     API_URL=$SAVED_URL
     expect T-ADM-49 "accept while the queue can't be reached" 200 '"emailStatus":"failed"'
     take_messages
@@ -597,7 +615,6 @@ fi
 U=/api/admin/users
 RUN_TAG=$(node -e 'process.stdout.write(require("crypto").randomBytes(4).toString("hex"))')
 HASH_MARKER="HASH-MARKER-$RUN_TAG"
-SEEDED_USERS=()
 seed_user() { # $1 userId, $2 role, $3 status
   AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Users --item \
     "{\"userId\":{\"S\":\"$1\"},\"email\":{\"S\":\"$1-$RUN_TAG@example-university.edu\"},\"name\":{\"S\":\"Seeded $2\"},\"role\":{\"S\":\"$2\"},\"status\":{\"S\":\"$3\"},\"passwordHash\":{\"S\":\"$HASH_MARKER\"},\"mustChangePassword\":{\"BOOL\":false},\"createdAt\":{\"S\":\"2026-11-27T00:00:00.000Z\"}}"
@@ -618,8 +635,6 @@ DISABLE='{"status":"disabled"}'; ENABLE='{"status":"active"}'
 
 if [ $HAVE_AWS = yes ]; then
   STARTED_MS=$(node -e 'process.stdout.write(String(Date.now()))')
-  # Phase A: the acting test admin needs its own Users row for the admin rule (Phase B: every user has one).
-  seed_user test-admin admin active
   S_STU="u-stu-$RUN_TAG"; S_REV="u-rev-$RUN_TAG"; S_ADM="u-adm-$RUN_TAG"
   seed_user "$S_STU" student active
   seed_user "$S_REV" reviewer disabled
@@ -627,25 +642,25 @@ if [ $HAVE_AWS = yes ]; then
 
   call GET $U ""
   expect T-ADM-50 "list users, no token" 401 UNAUTHENTICATED
-  call GET $U test-student-1
+  call GET $U "$STUDENT"
   expect T-ADM-50 "list users, student token" 403 FORBIDDEN
-  call POST $U test-reviewer '{"email":"x@example-university.edu","name":"X"}'
+  call POST $U "$REVIEWER" '{"email":"x@example-university.edu","name":"X"}'
   expect T-ADM-50 "create reviewer, reviewer token" 403 FORBIDDEN
   call PATCH $U/$S_STU/status "" "$DISABLE"
   expect T-ADM-50 "change status, no token" 401 UNAUTHENTICATED
 
-  call GET "$U?role=reviewer&status=disabled" test-admin
+  call GET "$U?role=reviewer&status=disabled" "$ADMIN"
   expect T-ADM-51 "filter role=reviewer&status=disabled" 200 "\"userId\":\"$S_REV\""
   node -e '
 const list = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 process.exit(Array.isArray(list) && list.length > 0 && list.every((u) => u.role === "reviewer" && u.status === "disabled") ? 0 : 1);' "$BODY" && ok=ok || ok=no
   result T-ADM-51 "every user in the filtered list is a disabled reviewer" $ok
-  call GET "$U?role=bogus" test-admin
+  call GET "$U?role=bogus" "$ADMIN"
   expect T-ADM-51 "unknown role filter" 400 "role must be one of"
-  call GET "$U?status=maybe" test-admin
+  call GET "$U?status=maybe" "$ADMIN"
   expect T-ADM-51 "unknown status filter" 400 "status must be one of"
 
-  call GET $U test-admin
+  call GET $U "$ADMIN"
   expect T-ADM-52 "list all users" 200 "\"userId\":\"$S_ADM\""
   no_secret_keys && ok=ok || ok=no
   result T-ADM-52 "list has no passwordHash/temporaryPassword key and no hash value" $ok
@@ -656,7 +671,7 @@ process.exit(list.every((u) => Object.keys(u).every((k) => allowed.includes(k)))
   result T-ADM-52 "every user object has only the 7 safe fields" $ok
 
   NEW_EMAIL="Reviewer-$RUN_TAG@Example.org"
-  call POST $U test-admin "{\"email\":\"$NEW_EMAIL\",\"name\":\"New Reviewer\",\"role\":\"admin\",\"passwordHash\":\"chosen\",\"mustChangePassword\":false}"
+  call POST $U "$ADMIN" "{\"email\":\"$NEW_EMAIL\",\"name\":\"New Reviewer\",\"role\":\"admin\",\"passwordHash\":\"chosen\",\"mustChangePassword\":false}"
   expect T-ADM-53 "create reviewer" 201 '"role":"reviewer"'
   NEW_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).userId||"")' "$BODY")
   TEMP_PW=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).temporaryPassword||"")' "$BODY")
@@ -674,13 +689,13 @@ process.exit(process.argv[2] !== process.argv[3] && process.argv[2] !== "chosen"
     "$(winpath "$ROOT/services/admin-service/node_modules/bcryptjs")" "$STORED_HASH" "$TEMP_PW" && ok=ok || ok=no
   result T-ADM-53 "stored passwordHash is a bcrypt hash of the temp password (not the password, not the body value)" $ok
 
-  call POST $U test-admin "{\"email\":\"$NEW_EMAIL\",\"name\":\"Same Email\"}"
+  call POST $U "$ADMIN" "{\"email\":\"$NEW_EMAIL\",\"name\":\"Same Email\"}"
   expect T-ADM-54 "same email again (any case)" 409 "already exists"
-  call POST $U test-admin '{"email":"not-an-email","name":"Bad Email"}'
+  call POST $U "$ADMIN" '{"email":"not-an-email","name":"Bad Email"}'
   expect T-ADM-54 "invalid email" 400 "valid email"
-  call POST $U test-admin '{"email":"ok@example-university.edu"}'
+  call POST $U "$ADMIN" '{"email":"ok@example-university.edu"}'
   expect T-ADM-54 "no name" 400 "Name"
-  call POST $U test-admin '{"email":"ok@example-university.edu","name":"Ok"}' text/plain
+  call POST $U "$ADMIN" '{"email":"ok@example-university.edu","name":"Ok"}' text/plain
   expect T-ADM-54 "Content-Type text/plain" 415 UNSUPPORTED_MEDIA_TYPE
 
   # Secrets must not be in AuditLog: the user_created row, and no AuditLog row at all.
@@ -692,72 +707,91 @@ process.exit(process.argv[2] !== process.argv[3] && process.argv[2] !== "chosen"
     && ! grep -qF -- "$HASH_MARKER" "$AUDIT_DUMP" && ok=ok || ok=no
   result T-ADM-55 "user_created is audited; no AuditLog row contains the temp password or any password hash" $ok
 
-  call PATCH $U/test-admin/status test-admin "$DISABLE"
+  call PATCH $U/$ADMIN_ID/status "$ADMIN" "$DISABLE"
   expect T-ADM-56 "disable your own account" 409 "your own account"
-  STATUS="test-admin row status $(user_field test-admin status)"
-  [ "$(user_field test-admin status)" = active ] && ok=ok || ok=no
+  STATUS="own row status $(user_field "$ADMIN_ID" status)"
+  [ "$(user_field "$ADMIN_ID" status)" = active ] && ok=ok || ok=no
   result T-ADM-56 "still active afterwards" $ok
 
-  call PATCH "$U/bad%20id/status" test-admin "$DISABLE"
+  call PATCH "$U/bad%20id/status" "$ADMIN" "$DISABLE"
   expect T-ADM-57 "user id with a space" 400 "User id"
-  call PATCH $U/no-such-user-$RUN_TAG/status test-admin "$DISABLE"
+  call PATCH $U/no-such-user-$RUN_TAG/status "$ADMIN" "$DISABLE"
   expect T-ADM-57 "unknown user" 404 USER_NOT_FOUND
-  call PATCH $U/$S_STU/status test-admin '{"status":"banned"}'
+  call PATCH $U/$S_STU/status "$ADMIN" '{"status":"banned"}'
   expect T-ADM-57 "status banned" 400 "Status must be one of"
-  call PATCH $U/$S_REV/status test-admin "$DISABLE"
+  call PATCH $U/$S_REV/status "$ADMIN" "$DISABLE"
   expect T-ADM-57 "disable an already disabled account" 409 "already disabled"
 
   DIS_BEFORE=$(count_action user_disabled); EN_BEFORE=$(count_action user_enabled)
-  call PATCH $U/$S_STU/status test-admin "$DISABLE"
+  call PATCH $U/$S_STU/status "$ADMIN" "$DISABLE"
   expect T-ADM-58 "disable a student" 200 '"status":"disabled"'
   no_secret_keys && ok=ok || ok=no
   result T-ADM-58 "status reply has no password fields" $ok
-  call PATCH $U/$S_STU/status test-admin "$ENABLE"
+  call PATCH $U/$S_STU/status "$ADMIN" "$ENABLE"
   expect T-ADM-58 "enable the student again" 200 '"status":"active"'
   STATUS="user_disabled $DIS_BEFORE -> $(count_action user_disabled), user_enabled $EN_BEFORE -> $(count_action user_enabled)"
   [ "$(count_action user_disabled)" -eq $((DIS_BEFORE + 1)) ] && [ "$(count_action user_enabled)" -eq $((EN_BEFORE + 1)) ] && ok=ok || ok=no
   result T-ADM-58 "exactly one user_disabled and one user_enabled row" $ok
 
-  call PATCH $U/$S_ADM/status test-admin "$DISABLE"
+  call PATCH $U/$S_ADM/status "$ADMIN" "$DISABLE"
   expect T-ADM-59 "an active admin disables another admin" 200 '"status":"disabled"'
 
-  set_user_status test-admin disabled   # the acting admin's own row says disabled (Phase B would block the token)
+  # Admins this run makes for itself (real accounts, logged in through auth-service), so the tests that disable or
+  # race admins never touch the seeded admin. Deleted with the other test users at the end (or by the trap).
+  make_admin() { # $1 tag → prints "userId token"
+    local email="t-adm-$1-$RUN_TAG@example-university.edu" pw id hash token
+    pw=$(node -e 'process.stdout.write(require("crypto").randomBytes(15).toString("base64url"))')
+    id=$(node -e 'process.stdout.write(require("crypto").randomUUID())')
+    hash=$(PW="$pw" node -e 'process.stdout.write(require(process.argv[1]).hashSync(process.env.PW, 10))' \
+      "$(winpath "$ROOT/services/admin-service/node_modules/bcryptjs")")
+    AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb put-item --table-name Users --item \
+      "{\"userId\":{\"S\":\"$id\"},\"email\":{\"S\":\"$email\"},\"name\":{\"S\":\"Test admin $1\"},\"role\":{\"S\":\"admin\"},\"status\":{\"S\":\"active\"},\"passwordHash\":{\"S\":\"$hash\"},\"mustChangePassword\":{\"BOOL\":false},\"createdAt\":{\"S\":\"2026-11-28T00:00:00.000Z\"}}"
+    token=$(EMAIL="$email" PW="$pw" node -e 'process.stdout.write(JSON.stringify({ email: process.env.EMAIL, password: process.env.PW }))' \
+      | curl -s -X POST "$AUTH_URL/api/auth/login" -H 'Content-Type: application/json' --data-binary @- \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).token||"")}catch{}})')
+    echo "$id $token"
+  }
+  read -r A2_ID A2 < <(make_admin a2); SEEDED_USERS+=("$A2_ID")
+  read -r A3_ID A3 < <(make_admin a3); SEEDED_USERS+=("$A3_ID")
+
+  # Phase B: an admin whose own account is no longer active is stopped by authenticate (401) before the rule's
+  # transaction runs. The transaction's own check on the acting admin is what the race below exercises.
+  set_user_status "$A2_ID" disabled
   set_user_status "$S_ADM" active
-  call PATCH $U/$S_ADM/status test-admin "$DISABLE"
-  expect T-ADM-60 "disable an admin while your own account is not an active admin" 409 "at least one active admin"
+  call PATCH $U/$S_ADM/status "$A2" "$DISABLE"
+  expect T-ADM-60 "an admin whose own account was disabled meanwhile tries to disable another admin" 401 UNAUTHENTICATED
   STATUS="target status $(user_field "$S_ADM" status)"
   [ "$(user_field "$S_ADM" status)" = active ] && ok=ok || ok=no
-  result T-ADM-60 "target admin still active (the transaction wrote nothing)" $ok
-  set_user_status test-admin active
+  result T-ADM-60 "target admin still active (nothing written)" $ok
+  set_user_status "$A2_ID" active
+
+  # Two real admins disable each other at the same moment, 5 times. Exactly one must win: the other gets 409 (its
+  # transaction's check on the acting admin failed) or 401 (authenticate already saw it disabled). One stays active.
+  RACE_OK=0; RACE_DETAIL=""
+  for trial in 1 2 3 4 5; do
+    set_user_status "$A2_ID" active; set_user_status "$A3_ID" active
+    curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $A2" -H 'Content-Type: application/json' \
+      --data "$DISABLE" "$API_URL$U/$A3_ID/status" > "$TMP/race-a" &
+    curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $A3" -H 'Content-Type: application/json' \
+      --data "$DISABLE" "$API_URL$U/$A2_ID/status" > "$TMP/race-b" &
+    wait
+    CA=$(cat "$TMP/race-a"); CB=$(cat "$TMP/race-b")
+    SA=$(user_field "$A2_ID" status); SB=$(user_field "$A3_ID" status)
+    ACTIVE=0; [ "$SA" = active ] && ACTIVE=$((ACTIVE+1)); [ "$SB" = active ] && ACTIVE=$((ACTIVE+1))
+    RACE_DETAIL="$RACE_DETAIL [$trial: $CA/$CB, active $ACTIVE]"
+    case "$CA $CB" in "200 409"|"409 200"|"200 401"|"401 200") [ "$ACTIVE" = 1 ] && RACE_OK=$((RACE_OK+1)) ;; esac
+  done
+  STATUS="$RACE_DETAIL"
+  [ "$RACE_OK" = 5 ] && ok=ok || ok=no
+  result T-ADM-61 "two admins disable each other at once, 5 times: always exactly one 200 and one admin left active" $ok
 
   if [ $GATEWAY = no ]; then
-    # A second local server that also accepts Bearer test-admin-2 (tests/second-admin.js), with its log kept.
+    # One create through a second local server whose log we keep: the temp password and hash must not be in it.
     SECOND_LOG="$TMP/second-server.log"
-    ( cd "$ROOT/services/admin-service" && PORT=3099 exec node -r ./tests/second-admin.js src/server.js > "$SECOND_LOG" 2>&1 ) &
+    ( cd "$ROOT/services/admin-service" && PORT=3099 exec node src/server.js > "$SECOND_LOG" 2>&1 ) &
     SECOND_PID=$!
     for _ in $(seq 1 30); do curl -s -o /dev/null http://localhost:3099/api/health && break; node -e "setTimeout(()=>{},300)"; done
-    seed_user test-admin-2 admin active
-    RACE_OK=0; RACE_DETAIL=""
-    for trial in 1 2 3 4 5; do
-      set_user_status test-admin active; set_user_status test-admin-2 active
-      curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Authorization: Bearer test-admin' -H 'Content-Type: application/json' \
-        --data "$DISABLE" "http://localhost:3099$U/test-admin-2/status" > "$TMP/race-a" &
-      curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Authorization: Bearer test-admin-2' -H 'Content-Type: application/json' \
-        --data "$DISABLE" "http://localhost:3099$U/test-admin/status" > "$TMP/race-b" &
-      wait $(jobs -p | grep -v "^$SECOND_PID$") 2>/dev/null
-      CA=$(cat "$TMP/race-a"); CB=$(cat "$TMP/race-b")
-      SA=$(user_field test-admin status); SB=$(user_field test-admin-2 status)
-      ACTIVE=0; [ "$SA" = active ] && ACTIVE=$((ACTIVE+1)); [ "$SB" = active ] && ACTIVE=$((ACTIVE+1))
-      RACE_DETAIL="$RACE_DETAIL [$trial: $CA/$CB, active $ACTIVE]"
-      { [ "$CA $CB" = "200 409" ] || [ "$CA $CB" = "409 200" ]; } && [ "$ACTIVE" = 1 ] && RACE_OK=$((RACE_OK+1))
-    done
-    STATUS="$RACE_DETAIL"
-    [ "$RACE_OK" = 5 ] && ok=ok || ok=no
-    result T-ADM-61 "two admins disable each other at once, 5 times: always one 200 + one 409 and one admin left active" $ok
-    set_user_status test-admin active
-
-    # One create through the second server, whose log we keep: the temp password and hash must not be in it.
-    curl -s -o "$BODY" -X POST -H 'Authorization: Bearer test-admin' -H 'Content-Type: application/json' \
+    curl -s -o "$BODY" -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
       --data "{\"email\":\"logcheck-$RUN_TAG@example.org\",\"name\":\"Log Check\"}" "http://localhost:3099$U"
     LOG_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).userId||"")' "$BODY")
     LOG_PW=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).temporaryPassword||"")' "$BODY")
@@ -769,7 +803,6 @@ process.exit(process.argv[2] !== process.argv[3] && process.argv[2] !== "chosen"
       && ! grep -qF -- "$LOG_HASH" "$SECOND_LOG" && ! grep -qF -- "$HASH_MARKER" "$SECOND_LOG" && ok=ok || ok=no
     result T-ADM-55 "local server log: no temp password, no password hash" $ok
   else
-    skip T-ADM-61 "two admins disabling each other at once" "needs the test-only second admin token (tests/second-admin.js), which only a local server loads; run on the local run"
     # Through the gateway the log is CloudWatch: search everything admin-service logged during this run.
     LOGS="$TMP/cloudwatch.txt"
     AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws logs filter-log-events --log-group-name /aws/lambda/admin-service \
@@ -799,35 +832,35 @@ json() { node -e "const d=JSON.parse(require('fs').readFileSync(process.argv[1],
 
 call GET "$AL?action=decision" ""
 expect T-ADM-63 "audit log, no token" 401 UNAUTHENTICATED
-call GET "$AL?action=decision" test-student-1
+call GET "$AL?action=decision" "$STUDENT"
 expect T-ADM-63 "audit log, student token" 403 FORBIDDEN
 call GET $ST ""
 expect T-ADM-63 "stats, no token" 401 UNAUTHENTICATED
-call GET $ST test-reviewer
+call GET $ST "$REVIEWER"
 expect T-ADM-63 "stats, reviewer token" 403 FORBIDDEN
 
-call GET $AL test-admin
+call GET $AL "$ADMIN"
 expect T-ADM-64 "no action" 400 "action is required"
-call GET "$AL?action=bogus" test-admin
+call GET "$AL?action=bogus" "$ADMIN"
 expect T-ADM-64 "unknown action" 400 "action must be one of"
-call GET "$AL?action=decision&since=yesterday" test-admin
+call GET "$AL?action=decision&since=yesterday" "$ADMIN"
 expect T-ADM-64 "since=yesterday" 400 "since must be a real ISO 8601"
-call GET "$AL?action=decision&since=2027-02-30T10:00:00Z" test-admin
+call GET "$AL?action=decision&since=2027-02-30T10:00:00Z" "$ADMIN"
 expect T-ADM-64 "since on 30 February" 400 "since must be a real ISO 8601"
 for bad in 0 101 abc -1; do
-  call GET "$AL?action=decision&limit=$bad" test-admin
+  call GET "$AL?action=decision&limit=$bad" "$ADMIN"
   expect T-ADM-64 "limit=$bad" 400 "limit must be a whole number from 1 to 100"
 done
-call GET "$AL?action=decision&next=not-a-token" test-admin
+call GET "$AL?action=decision&next=not-a-token" "$ADMIN"
 expect T-ADM-64 "next that is not a token" 400 "not a valid paging token"
-call GET "$AL?action=scholarship_created&next=$(b64url '{"action":"decision","sortKey":"2026"}')" test-admin
+call GET "$AL?action=scholarship_created&next=$(b64url '{"action":"decision","sortKey":"2026"}')" "$ADMIN"
 expect T-ADM-64 "next made for another action" 400 "not a valid paging token"
-call GET "$AL?action=decision&next=$(b64url '{"action":"decision","sortKey":"2026","extra":"x"}')" test-admin
+call GET "$AL?action=decision&next=$(b64url '{"action":"decision","sortKey":"2026","extra":"x"}')" "$ADMIN"
 expect T-ADM-64 "next with an extra key" 400 "not a valid paging token"
 
 STEP7_START=$(node -e 'process.stdout.write(new Date(Date.now() - 1000).toISOString())')
 A1=$(new_draft); A2=$(new_draft); A3=$(new_draft)
-call GET "$AL?action=scholarship_created&since=$STEP7_START" test-admin
+call GET "$AL?action=scholarship_created&since=$STEP7_START" "$ADMIN"
 expect T-ADM-65 "created scholarships since this run's start" 200 '"items"'
 node -e '
 const { items, next } = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -836,16 +869,16 @@ const keysOk = items.every((r) => Object.keys(r).sort().join(",") === "action,cr
 const newestFirst = items.every((r, i) => i === 0 || items[i - 1].createdAt >= r.createdAt);
 const want = [ids[2], ids[1], ids[0]].join(",");
 process.exit(items.length === 3 && next === null && keysOk && newestFirst && items.map((r) => r.targetId).join(",") === want
-  && items.every((r) => r.action === "scholarship_created" && r.userId === "test-admin") ? 0 : 1);' "$BODY" "$A1" "$A2" "$A3" && ok=ok || ok=no
+  && items.every((r) => r.action === "scholarship_created" && r.userId === process.env.ADMIN_ID) ? 0 : 1);' "$BODY" "$A1" "$A2" "$A3" && ok=ok || ok=no
 STATUS="items $(json 'd=>d.items.length'), next $(json 'd=>d.next')"
 result T-ADM-65 "exactly the 3 new rows, newest first, only the 5 fields, next null" $ok
-call GET "$AL?action=scholarship_created&since=2099-01-01T00:00:00Z" test-admin
+call GET "$AL?action=scholarship_created&since=2099-01-01T00:00:00Z" "$ADMIN"
 expect T-ADM-65 "since in the future" 200 '{"items":[],"next":null}'
 
-call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2" test-admin
+call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2" "$ADMIN"
 expect T-ADM-66 "first page, limit 2" 200 '"items"'
 P1_IDS=$(json 'd=>d.items.map(r=>r.targetId).join(",")'); P1_COUNT=$(json 'd=>d.items.length'); NEXT=$(json 'd=>d.next||""')
-call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2&next=$NEXT" test-admin
+call GET "$AL?action=scholarship_created&since=$STEP7_START&limit=2&next=$NEXT" "$ADMIN"
 expect T-ADM-66 "second page with next" 200 '"items"'
 P2_IDS=$(json 'd=>d.items.map(r=>r.targetId).join(",")'); P2_NEXT=$(json 'd=>d.next')
 STATUS="page 1: $P1_COUNT items, page 2: [$P2_IDS], page 2 next $P2_NEXT"
@@ -853,7 +886,7 @@ STATUS="page 1: $P1_COUNT items, page 2: [$P2_IDS], page 2 next $P2_NEXT"
   && [ "$P1_IDS" = "$A3,$A2" ] && ok=ok || ok=no
 result T-ADM-66 "2 + 1 rows over two pages, no overlap, no next after the last page" $ok
 
-call GET "$AL?action=scholarship_created&limit=100" test-admin
+call GET "$AL?action=scholarship_created&limit=100" "$ADMIN"
 expect T-ADM-67 "limit 100 (the cap)" 200 '"items"'
 STATUS="items $(json 'd=>d.items.length')"
 [ "$(json 'd=>d.items.length')" -le 100 ] && ok=ok || ok=no
@@ -861,11 +894,11 @@ result T-ADM-67 "never more than 100 rows in one call" $ok
 
 if [ $HAVE_AWS = yes ]; then
   # Secrets: create a reviewer (temp password + hash), then read the audit output for this run.
-  call POST $U test-admin "{\"email\":\"audit-$RUN_TAG@example.org\",\"name\":\"Audit Check\"}"
+  call POST $U "$ADMIN" "{\"email\":\"audit-$RUN_TAG@example.org\",\"name\":\"Audit Check\"}"
   AU_ID=$(json 'd=>d.userId||""'); AU_PW=$(json 'd=>d.temporaryPassword||""'); AU_HASH=$(user_field "$AU_ID" passwordHash)
   OUT="$TMP/audit-out.txt"; : > "$OUT"
   for act in user_created forbidden scholarship_created; do
-    call GET "$AL?action=$act&since=$STEP7_START" test-admin
+    call GET "$AL?action=$act&since=$STEP7_START" "$ADMIN"
     cat "$BODY" >> "$OUT"
   done
   STATUS="user_created rows for the new user $(grep -o "\"targetId\":\"$AU_ID\"" "$OUT" | wc -l | tr -d ' '); temp password $(grep -cF -- "$AU_PW" "$OUT"); hash $(grep -cF -- "$AU_HASH" "$OUT"); passwordHash/Bearer/authorization $(grep -ciE 'passwordHash|bearer|authorization' "$OUT")"
@@ -875,7 +908,7 @@ if [ $HAVE_AWS = yes ]; then
   AWS_PROFILE=floci MSYS_NO_PATHCONV=1 aws dynamodb delete-item --table-name Users --key "{\"userId\":{\"S\":\"$AU_ID\"}}"
 else skip T-ADM-68 "no secrets in the audit output" "need the AWS CLI to read the stored hash"; fi
 
-call GET $ST test-admin
+call GET $ST "$ADMIN"
 expect T-ADM-69 "stats" 200 '"scholarships"'
 node -e '
 const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -889,7 +922,7 @@ if [ $HAVE_AWS = yes ]; then
   STATS_BEFORE="$(winpath "$TMP/stats-before")"; cp "$BODY" "$STATS_BEFORE"
   SD=$(new_draft); SP=$(published_scholarship 2)
   ST_APPS=(); for st in submitted reviewed accepted; do a=$(uuid); seed_app "$a" "$SP" "$st" false; ST_APPS+=("$a"); done
-  call GET $ST test-admin
+  call GET $ST "$ADMIN"
   STATUS="$(node -e '
 const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")), a = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
 const d = (g) => Object.fromEntries(Object.keys(a[g]).map((k) => [k, a[g][k] - b[g][k]]));
@@ -1000,7 +1033,7 @@ if [ $HAVE_AWS = yes ]; then
   if [ $GATEWAY = yes ]; then
     DLQ_BEFORE=$(dlq_count)
     DS=$(published_scholarship 2); DA=$(uuid); seed_app "$DA" "$DS" reviewed false
-    call PATCH $DEC/$DA/decision test-admin "$ACC"
+    call PATCH $DEC/$DA/decision "$ADMIN" "$ACC"
     for _ in $(seq 1 30); do
       [ "$(app_field "$DA" emailStatus)" = failed ] && [ "$(dlq_count)" -gt "$DLQ_BEFORE" ] && break
       node -e "setTimeout(()=>{},15000)"
@@ -1030,7 +1063,7 @@ if [ $HAVE_AWS = yes ]; then
   if AWSF ssm get-parameter --name /scholarship/brevo-api-key >/dev/null 2>&1 && [ -n "$SENDER_ADDR" ] && [ "$SENDER_ADDR" != None ] && [ "$SANDBOX" = true ]; then
     SENT_BEFORE=$(count_action email_sent)
     RS=$(published_scholarship 2); RA=$(uuid); seed_app "$RA" "$RS" reviewed false
-    call PATCH $DEC/$RA/decision test-admin "$ACC"
+    call PATCH $DEC/$RA/decision "$ADMIN" "$ACC"
     for _ in $(seq 1 20); do [ "$(app_field "$RA" emailStatus)" = sent ] && break; node -e "setTimeout(()=>{},3000)"; done
     STATUS="emailStatus $(app_field "$RA" emailStatus), email_sent $SENT_BEFORE -> $(count_action email_sent)"
     [ "$(app_field "$RA" emailStatus)" = sent ] && [ "$(count_action email_sent)" -eq $((SENT_BEFORE + 1)) ] && ok=ok || ok=no
