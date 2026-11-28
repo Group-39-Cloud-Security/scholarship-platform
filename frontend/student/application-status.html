@@ -1,0 +1,41 @@
+<!-- student/application-status.html?id=<applicationId> — Owner: Mohamed Khalil. One application: status timeline, own PDF, withdraw. Calls the API via ../js/api.js; textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Application status | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1 id="title">Application status</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <section id="details" hidden>
+      <dl class="facts">
+        <dt>Status</dt><dd id="status">-</dd>
+        <dt>Submitted</dt><dd id="submitted">-</dd>
+        <dt>Deadline</dt><dd id="deadline">-</dd>
+      </dl>
+      <h2>Timeline</h2>
+      <ol id="timeline" class="timeline"></ol>
+      <p>
+        <button type="button" id="pdf" class="secondary">Open my PDF (link valid 5 minutes)</button>
+        <button type="button" id="withdraw" class="danger" hidden>Withdraw application</button>
+      </p>
+    </section>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="application-status.js"></script>
+</body>
+</html>
