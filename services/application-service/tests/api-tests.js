@@ -1,7 +1,10 @@
 // api-tests.js — end-to-end tests for application-service: every function, every status code, every business rule.
 // Owner: Mohamed Khalil.  Prints PASS/FAIL per test ID (copy the rows into docs/api-test-plan.md as evidence).
 //
-// Usage (from services/application-service, after node scripts/test-scholarships.js):
+// Usage (from services/application-service, after node scripts/test-scholarships.js and platform/seed.sh):
+//   export STUDENT1_TOKEN=$(bash ../../platform/get-token.sh student) STUDENT2_TOKEN=$(bash ../../platform/get-token.sh student2)
+//   export REVIEWER_TOKEN=$(bash ../../platform/get-token.sh reviewer) ADMIN_TOKEN=$(bash ../../platform/get-token.sh admin)
+//   plus STUDENT1_ID / STUDENT2_ID (their userId from GET /api/auth/me), then:
 //   On Floci:   API_URL=http://<API_ID>.execute-api.localhost.floci.io:4566 node tests/api-tests.js
 //   Locally:    npm run dev   (other terminal)   then   API_URL=http://localhost:3000 node tests/api-tests.js
 // It also talks to DynamoDB directly (same AWS settings as the CLI) for two things only:
@@ -37,12 +40,18 @@ async function call(method, path, { token, body, raw, type = 'application/json' 
   return { status: res.status, json, headers: res.headers };
 }
 
-const S1 = 'test-student-1';
-const S2 = 'test-student-2';
+// Phase B: real tokens from platform/get-token.sh (student, student2, reviewer, admin) and the two students' userIds
+// (GET /api/auth/me). Without them it falls back to the old Phase A test tokens, which now get 401.
+const S1 = process.env.STUDENT1_TOKEN || 'test-student-1';
+const S2 = process.env.STUDENT2_TOKEN || 'test-student-2';
+const REVIEWER = process.env.REVIEWER_TOKEN || 'test-reviewer';
+const ADMIN = process.env.ADMIN_TOKEN || 'test-admin';
+const S1_ID = process.env.STUDENT1_ID || S1;
+const S2_ID = process.env.STUDENT2_ID || S2;
 const essay = Array.from({ length: 250 }, (_, i) => `word${i}`).join(' ');
 const pdf = Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n').toString('base64');
 const goodBody = (scholarshipId) => ({ scholarshipId, essay, gpa: 3.2, yearOfStudy: 2, pdfBase64: pdf });
-const run = createTestRun([S1, S2]);
+const run = createTestRun([S1_ID, S2_ID]);
 
 (async () => {
   console.log(`Testing ${API}\n`);
@@ -76,11 +85,11 @@ const run = createTestRun([S1, S2]);
     r = await call('GET', '/api/scholarships/test-draft', { token: S1 });
     check('T-APP-06', 'draft by id → 404 SCHOLARSHIP_NOT_FOUND', r.status === 404 && r.json?.error?.code === 'SCHOLARSHIP_NOT_FOUND', r.status);
 
-    r = await call('GET', '/api/scholarships/test-open', { token: 'test-reviewer' });
+    r = await call('GET', '/api/scholarships/test-open', { token: REVIEWER });
     check('T-APP-07', 'any logged-in role may view one → 200', r.status === 200 && r.json.isOpen === true, r.status);
 
     // ---------- apply: format and validation ----------
-    r = await call('POST', '/api/applications', { token: 'test-admin', body: goodBody('test-open') });
+    r = await call('POST', '/api/applications', { token: ADMIN, body: goodBody('test-open') });
     check('T-APP-08', 'apply as admin → 403 FORBIDDEN', r.status === 403 && r.json?.error?.code === 'FORBIDDEN', r.status);
 
     r = await call('POST', '/api/applications', { body: goodBody('test-open') });
@@ -142,7 +151,7 @@ const run = createTestRun([S1, S2]);
     r = await call('GET', '/api/applications/mine', { token: S2 });
     check('T-APP-27', "student 2 doesn't see student 1's application", r.status === 200 && !r.json.some((a) => a.applicationId === appId), r.status);
 
-    r = await call('GET', '/api/applications/mine', { token: 'test-reviewer' });
+    r = await call('GET', '/api/applications/mine', { token: REVIEWER });
     check('T-APP-28', 'mine as reviewer → 403', r.status === 403, r.status);
 
     // ---------- PDF download ----------
