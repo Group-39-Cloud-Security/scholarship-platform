@@ -1,58 +1,60 @@
 # 11. Logs and monitoring
 
-Owner: Mohamed Hazem. Screenshots marked [Screenshot] are taken on Floci after the final deploy.
+Written by Mohamed Hazem. The screenshots are taken on Floci after the final deploy.
 
-## What we log, and where
+## What we log
 
-| Source | Where it goes | What is in it | What is never in it |
-|---|---|---|---|
-| Request log (`shared-lib/logger.js`), one line per request from every service | CloudWatch Logs, `/aws/lambda/<function>` | `level`, `fn`, `method`, `path` (no query string), `status`, `userId`, `action` | bodies, essays, passwords, tokens, headers, presigned links |
-| Error and job lines (`log()`) | the same log groups | a short message and safe fields (ids, error name, counts) | stack traces in responses, AWS error text |
-| Business and security events (`shared-lib/audit.js`) | DynamoDB `AuditLog` (PK `action`, SK `<createdAt>#<id>`) | `action`, `userId`, `targetId`, short `detail` | secrets, essays, request bodies |
+Every service uses `shared-lib/logger.js`, which writes one JSON line per request to CloudWatch Logs (`/aws/lambda/<function name>`). The line has the level, function name, method, path, status code, userId and action. We don't log request bodies, essays, passwords, tokens, headers or PDF links, and the query string is cut from the path.
 
-Level follows the status: `info` below 400, `warn` for 4xx, `error` for 5xx, so failures can be filtered by level.
-Audit actions include `login`, `login_failed`, `forbidden`, `claim`, `release`, `review`, `claim_expired`, `pdf_download`, `decision`, `user_created`. No role can update or delete `AuditLog` items (IAM, `docs/CLAUDE.md` section 7).
+The level depends on the status code: info for normal requests, warn for 4xx and error for 5xx. This makes it easy to look only at the failures.
 
-What the request line for T-REV-02 (a student calling the reviewer queue) looks like:
+Errors and the hourly job also write short lines to the same log groups, with safe fields only like ids, the error name or a count. Stack traces and AWS error messages are never sent back to the user.
+
+Security and business events are saved in the AuditLog table in DynamoDB with `shared-lib/audit.js` (action, userId, targetId and a short detail). Some of the actions are login, login_failed, forbidden, claim, release, review, claim_expired, pdf_download, decision and user_created. No IAM role is allowed to update or delete AuditLog items.
+
+This is the request line for T-REV-02 (a student calling the reviewer queue):
 ```json
 {"level":"warn","fn":"review-service","method":"GET","path":"/api/reviews/queue","status":403,"userId":"test-student-1","action":null}
 ```
 
 ## Metric filter and alarm
 
-Created by `services/review-service/infra/deploy.sh`:
-- Metric filter `login-failed` on `/aws/lambda/auth-service`, pattern `"\"action\":\"login_failed\""` (changed from a JSON pattern in the auth-service PR), metric `Group39/Security / LoginFailed`.
-- Alarm `login-failed-spike`: `Sum > 20` in 5 minutes.
+Both are created in `services/review-service/infra/deploy.sh`:
+- metric filter `login-failed` on `/aws/lambda/auth-service`. It counts the lines that contain `"action":"login_failed"` (metric `Group39/Security / LoginFailed`).
+- alarm `login-failed-spike`, which goes off when there are more than 20 failed logins in 5 minutes.
 
-Why a plain-text pattern: Lambda writes `<time> <requestId> <level>` before our JSON line, so a JSON pattern like `{ $.action = "login_failed" }` never matched on Floci. The quoted phrase matches the field exactly.
-What it detects: password guessing across many accounts or IPs, which the per email + IP backoff in auth-service does not see as a whole.
+At first I used a JSON pattern (`{ $.action = "login_failed" }`) but it never matched on Floci, because Lambda adds the time, request id and level before our JSON. Now the filter searches for the text `"action":"login_failed"` instead, and that works.
+
+auth-service already slows down wrong passwords for the same email and IP. The alarm is for when someone tries passwords on a lot of accounts or from a lot of IPs, which the backoff alone wouldn't notice.
+
 [Screenshot: metric filter and alarm in Floci Dash] [Screenshot: alarm state after more than 20 failed logins]
 
-## Example showing errors
+## Example of an error
 
-From the end-to-end run (27 Nov 23:56 UTC, `evidence/e2e-run-floci.txt` on branch `hazem-e2e`), notification-sender could not read the Brevo key (the raw log has these fields on separate lines):
+In the end-to-end run on 27 Nov (`evidence/e2e-run-floci.txt` on the `hazem-e2e` branch), notification-sender couldn't read the Brevo key. In the raw log these are on separate lines:
 ```
 2026-11-27T23:56:00.766Z  bb6c974a-5322-4d97-9c21-94b3e02325d0  ERROR
 {"level":"error","fn":"notification-sender","message":"decision email failed","applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","attempt":1,"lastAttempt":false,"error":"ParameterNotFound"}
 ```
-The line names the application and the error type only (no email address, no key), and it shows the retry design: `lastAttempt: false`, so SQS retries and then moves the message to `notifications-dlq`.
+The line only has the application id and the error type, there's no email address and no key. `lastAttempt` is false, so SQS tries again, and after the last try the message goes to `notifications-dlq`.
 
-## Example showing suspicious activity
+## Example of suspicious activity
 
-A student token calling a reviewer route (T-REV-02) gets 403. The request line is logged as `warn` with `status: 403`, and `shared-lib/auth.js` writes a `forbidden` row to `AuditLog`, so an admin sees it with `GET /api/admin/audit-log?action=forbidden`.
+When a student token calls a reviewer route (T-REV-02) it gets 403. The request is logged as warn with status 403, and `shared-lib/auth.js` also writes a forbidden row to AuditLog. The admin can see these with `GET /api/admin/audit-log?action=forbidden`.
+
 [Screenshot: audit-log response with forbidden rows]
 
-## How to look at them
+## How to check the logs
 
 ```bash
-# request lines with errors for one function
+# 403s in review-service
 aws logs filter-log-events --log-group-name /aws/lambda/review-service --filter-pattern '"\"status\":403"'
 # a decision email and its retries
 aws logs filter-log-events --log-group-name /aws/lambda/notification-sender --filter-pattern '"decision email"'
-# security events through the API (admin only)
+# forbidden events through the API (needs an admin token)
 curl -H "Authorization: Bearer <admin token>" "$API_URL/api/admin/audit-log?action=forbidden"
 ```
 
-## Checked: no sensitive values
+## No sensitive data in the logs
 
-The logger only writes the fields above; the reviewer's temporary password, PDF links, essays and tokens never appear in any log line or audit row (checked in the review-service tests and in the e2e output, where the temporary password was hidden before printing).
+The logger only writes the fields listed above. I went through the review-service test output and the e2e output and there were no passwords, tokens, essays or PDF links in any log line or audit row. In the e2e script the reviewer's temporary password was hidden before it was printed.

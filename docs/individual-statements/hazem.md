@@ -1,76 +1,87 @@
 # Individual Contribution Statement: Mohamed Hazem
 
-Component: **Reviewer Scoring** (`review-service` + `release-expired-claims`).
-Repository: `services/review-service`, `frontend/reviewer`, my sections of `docs/api-contract.md` and `docs/api-test-plan.md`.
-Pull requests: #8 (the service), #12 (test results), #15 (README and decisions). Branch for the end-to-end run: `hazem-e2e`.
+Component: Reviewer Scoring (review-service and the release-expired-claims job)
+My files: `services/review-service`, `frontend/reviewer`, and my parts of `docs/api-contract.md` and `docs/api-test-plan.md`
+My PRs: #8 (the service), #12 (test results), #15 (README and decisions). The end-to-end run is on the `hazem-e2e` branch.
 
 ## 1. Owned component and functions
-Reviewers take applications from a shared queue, score them against the scholarship's rubric (or flag them) and the result goes to the admin's decision.
+My part is the reviewer side. A reviewer takes an application from the queue, scores it using the scholarship's rubric or flags it, and then the admin uses that to accept or reject the student.
 
-| Function | Endpoint | Role |
+| What | Endpoint | Who can use it |
 |---|---|---|
-| View the queue | `GET /api/reviews/queue` | reviewer |
-| Claim an application | `POST /api/reviews` | reviewer |
-| Open a claimed application with its rubric | `GET /api/reviews/{applicationId}` | reviewer (the claimer) |
-| Score or flag (final) | `PUT /api/reviews/{applicationId}` | reviewer (the claimer) |
-| My claims and reviews | `GET /api/reviews/mine` | reviewer |
-| Release a claim | `DELETE /api/reviews/{applicationId}` | the claimer, or any admin |
-| 5 minute PDF link | `GET /api/reviews/{applicationId}/pdf` | reviewer (the claimer) |
-| Release claims older than 48 h | `release-expired-claims` Lambda, hourly | EventBridge Scheduler |
+| See the queue | GET /api/reviews/queue | reviewer |
+| Claim an application | POST /api/reviews | reviewer |
+| Open a claimed application | GET /api/reviews/{id} | the reviewer who claimed it |
+| Submit scores or a flag | PUT /api/reviews/{id} | the reviewer who claimed it |
+| My claims and reviews | GET /api/reviews/mine | reviewer |
+| Release a claim | DELETE /api/reviews/{id} | the reviewer who claimed it, or an admin |
+| Get the PDF link | GET /api/reviews/{id}/pdf | the reviewer who claimed it |
+| Release claims older than 48 hours | release-expired-claims Lambda | runs every hour from EventBridge Scheduler |
 
-AWS services in my component: Lambda (2 functions), DynamoDB (`Reviews`), EventBridge Scheduler, CloudWatch (metric filter and alarm), IAM (one role per function plus the scheduler role).
+AWS services I used: Lambda (2 functions), DynamoDB (Reviews table), EventBridge Scheduler, CloudWatch, IAM, and S3 for the PDF links.
 
 ## 2. Frontend
-Three pages in `frontend/reviewer`: `queue.html` (claim), `review.html` (essay, eligibility rules, PDF button, scoring form with a live total preview, flag form, release) and `my-reviews.html` (open claims with time left, submitted reviews).
-Text from the database is only ever put on the page with `textContent`, never `innerHTML`, and every page has a Content-Security-Policy meta tag (only our own scripts and styles, only our API). The token is kept in `sessionStorage` and a 401 sends the user back to the login page.
-[Screenshot: queue page] [Screenshot: review page with scores] [Screenshot: my reviews]
+I made three pages in `frontend/reviewer`:
+- `queue.html` shows the submitted applications with a Claim button.
+- `review.html` shows the essay, the eligibility rules and a PDF button, with a form for the scores (the total updates while you type) or a flag, and a Release button.
+- `my-reviews.html` shows my open claims with the time left, and the reviews I already submitted.
+
+All text that comes from the database is added with `textContent` and not `innerHTML`, so a script inside an essay can't run. Every page also has a CSP meta tag. The token is kept in sessionStorage, and if the API returns 401 the page goes back to the login page.
+
+[Screenshot: queue page] [Screenshot: review page] [Screenshot: my reviews page]
 
 ## 3. Backend / API
-Express app on Lambda (`serverless-http`), following the team pattern: routes (method, path, role), controller (415, validation 400, business rules 409, status code), services (AWS calls only).
-Business rules:
-- a claim is one conditional `UpdateItem` (`status = submitted`), so two reviewers can never get the same application
-- at most 5 open claims per reviewer
-- scores: every rubric criterion exactly once, whole number 0-10, no extra criteria; the total is `sum(score * weight) / 10`, calculated by the server
-- a submitted review is final (409 on a second submit)
-- claims older than 48 h go back to the queue (hourly job)
-Request and response examples for every endpoint are in my section of `docs/api-contract.md`.
+The service is an Express app that runs on Lambda using serverless-http. I followed the same structure as the rest of the team: routes, controllers and services.
+
+The main rules:
+- A claim is one conditional update in DynamoDB, so two reviewers can't get the same application.
+- A reviewer can have at most 5 open claims.
+- Every criterion in the rubric needs a whole number from 0 to 10. The server calculates the total (each score times its weight, added up and divided by 10). A total sent by the client is not accepted.
+- After a review is submitted it can't be changed (409).
+- A claim older than 48 hours goes back to the queue.
+
+Examples of every request and response are in my part of `docs/api-contract.md`.
 
 ## 4. Data operations
-- `Reviews` (mine): one item per application, written once with `attribute_not_exists`; `reviewerId-index` for "my reviews".
-- `Applications` (Khalil's table): read, and status changed only through conditional updates (`submitted -> under_review -> reviewed`, or back to `submitted`); the queue reads `status-index`.
-- `Scholarships` (Wael's table): read the rubric (`GetItem` only).
-- `AuditLog`: `claim`, `review`, `release`, `claim_expired`, `pdf_download`.
-- S3 `scholarship-documents`: no reads by the service itself, it only signs a 5 minute GET link for the claimer.
+- Reviews (my table): one review per application, written only once using `attribute_not_exists`. It has a `reviewerId-index` for the my reviews page.
+- Applications (Khalil's table): I read it and only change the status with conditional updates (submitted to under_review to reviewed, or back to submitted). The queue reads `status-index`.
+- Scholarships (Wael's table): I only read the rubric.
+- AuditLog: I write claim, review, release, claim_expired and pdf_download.
+- S3: my service doesn't read the PDFs itself. It only makes a 5 minute link for the reviewer who claimed the application.
 
 ## 5. Security controls
-- Authentication on every route, role checked on the server (401/403).
-- The reviewer id comes from the token, never the body; status, total and dates are set by the server.
-- Ownership: someone else's claim returns 404, not 403, so ids can't be probed. Ids are checked against a pattern before reaching DynamoDB.
-- Concurrency: atomic claim with a condition; reviews are write-once; the expiry job only releases a claim if `claimedAt` is unchanged.
-- Least privilege: each Lambda has its own role (`infra/iam/*.json`) with a `Sid` per statement and only its own log group; the review role has no Update or Delete on `Reviews`.
-- Privacy: the queue and review page leave out the student's id and email; PDFs stay private, links last 5 minutes, every link is audited, the link itself is never logged; responses have `Cache-Control: no-store`.
-- Security headers on every response (`nosniff`, `X-Frame-Options: DENY`, CSP), no `X-Powered-By`, CORS only for our website.
-- Monitoring: CloudWatch metric filter and alarm for failed logins (more than 20 in 5 minutes).
-- No secrets in the code or the history (checked with detect-secrets), `npm audit` with 0 vulnerabilities, Node.js 24 runtime.
+- Every route needs a valid login, and the role is checked on the server (401 or 403).
+- The reviewer id is taken from the token, not from the request body. Status, total and dates are also set by the server.
+- If a reviewer asks for an application someone else claimed they get 404 instead of 403, so they can't tell which ids exist. Ids are checked with a regex before they reach DynamoDB.
+- Claims are atomic, reviews can only be written once, and the expiry job only releases a claim if `claimedAt` didn't change since it read it.
+- Each Lambda has its own IAM role with only the permissions it needs, and it can only write to its own log group. The review-service role can't update or delete reviews.
+- The reviewer doesn't see the student's id or email. PDF links last 5 minutes, every link is saved in AuditLog, and the link itself is not logged. Responses have `Cache-Control: no-store` so essays don't stay in the browser cache.
+- Security headers on every response (nosniff, X-Frame-Options DENY, CSP), X-Powered-By is turned off, and CORS only allows our website.
+- CloudWatch metric filter and alarm for failed logins (more than 20 in 5 minutes).
+- I checked for secrets with detect-secrets and ran npm audit (0 vulnerabilities). Both Lambdas run on Node.js 24.
 
 ## 6. Tests
-- Unit tests for the scoring rules (`npm test`, 6 tests).
-- `tests/api-tests.sh`: 28 checks with curl through API Gateway on Floci, including 5 parallel claims (exactly one 201) and the 6th claim (409). On 27 Nov they all passed; a 29th check that opened the PDF link failed because of the `floci` host name (section 9) and was taken out. Local run: `evidence/review-api-tests-local.txt`.
-- Postman collection `tests/postman/review-service.postman_collection.json`: 20 requests, 25 checks.
-- All 24 T-REV rows in `docs/api-test-plan.md` are filled with the actual results.
+- 6 unit tests for the scoring rules (`npm test`).
+- `tests/api-tests.sh` runs 28 checks with curl through API Gateway on Floci. This includes 5 claims sent at the same time (only one gets 201) and a 6th claim (409). All 28 passed on 27 Nov. I had one more check that opened the PDF link, but it failed because of the floci hostname (see section 9) so I removed it. Local run: `evidence/review-api-tests-local.txt`.
+- Postman collection with 20 requests and 25 checks (`tests/postman`).
+- All 24 T-REV rows in `docs/api-test-plan.md` have the actual results.
+
 [Screenshot: api-tests.sh output] [Screenshot: Postman run]
 
 ## 7. Integration work
-- Checked my service against Khalil's and Wael's code: `status-index` projection, Khalil's lock rows never reaching the queue, the rubric format, Wael reading `flagged` and `Reviews` for the decision email.
-- End-to-end run through the gateway on a clean Floci (`evidence/e2e-walkthrough.md`, branch `hazem-e2e`): admin creates a reviewer and a scholarship, student applies, reviewer claims and scores (total 70), student sees "reviewed", admin accepts, student sees "accepted", notification-sender is triggered. Login was blocked because auth-service was not built yet, and the email was not sent because my laptop has no Brevo key.
+- Before merging I checked my service against Khalil's and Wael's code. For example, that `status-index` has the fields I need, that Khalil's lock rows never show up in my queue, that the rubric format matches, and that Wael reads `flagged` and the review for the decision email.
+- I did a full end-to-end run through API Gateway on a clean Floci (`evidence/e2e-walkthrough.md` on `hazem-e2e`). The admin created a reviewer and a scholarship, a student applied, the reviewer claimed and scored it (total 70), the student saw "reviewed", the admin accepted it, the student saw "accepted" and notification-sender was triggered. Login wasn't built yet at that time, and the email wasn't sent because I don't have a Brevo key on my laptop.
 
 ## 8. Technical decisions
-Logged in `docs/decisions.md`: the queue returns the 50 oldest applications; the 5 claim limit is a count followed by an atomic claim (known gap, accepted); PDFs through 5 minute presigned links with a `pdf_download` audit row.
+These are written in `docs/decisions.md`:
+- The queue returns the 50 oldest submitted applications, not all of them.
+- The 5 claim limit counts the claims first and then claims. A reviewer clicking very fast could get a 6th one. We accepted this for now because fixing it fully needs a counter in the Users table, which is shared.
+- PDFs are opened with a 5 minute presigned link, and each one is logged as pdf_download.
 
 ## 9. Difficulties and solutions
-- **Two reviewers claiming at once:** solved with a conditional update instead of read-then-write; tested with 5 parallel requests.
-- **Node.js 20 out of support:** moved the Lambdas to `nodejs24.x`.
-- **npm 11 blocked install scripts (`EALLOWSCRIPTS`):** the expiry job's packages are now picked from the service's own `node_modules` when zipping, with no second `npm install`.
-- **PDF link not opening on Floci:** the presigned link uses `floci:4566`, Floci's name inside Docker; it works with a `127.0.0.1 floci` hosts entry, and on AWS it points to S3.
-- **Failed-login alarm never matching:** Lambda writes a timestamp and request id before our JSON, so my JSON filter pattern matched nothing. Wael found it and changed it to a plain-text pattern in his auth-service PR.
-- **Testing before the other services existed:** wrote `tests/local-test-data.sh` to create test applications and a scholarship.
+- Two reviewers claiming at the same time: I used a conditional update instead of reading and then writing, and tested it with 5 requests at once.
+- Node.js 20 support ended, so I moved both Lambdas to nodejs24.x.
+- npm 11 blocked install scripts (EALLOWSCRIPTS) when I built the zip for the expiry job. I changed the zip script so it takes the packages from the service's own node_modules.
+- The PDF link didn't open on Floci because it uses `floci:4566`, which is Floci's name inside Docker. Adding `127.0.0.1 floci` to the hosts file fixes it, and on real AWS the link goes straight to S3.
+- My first metric filter never matched anything, because Lambda adds the time and request id before our JSON log line. Wael noticed it and changed it to a plain text pattern in the auth-service PR.
+- The other services weren't ready when I started testing, so I wrote `tests/local-test-data.sh` to create test applications and a scholarship.
