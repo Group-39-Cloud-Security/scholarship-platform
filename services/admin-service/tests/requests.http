@@ -563,3 +563,19 @@ Authorization: Bearer {{adminToken}}
 ### T-ADM-82 a message for an email still "sending": skipped on attempt 1, marked failed on a retry — only in tests/api-tests.sh
 
 ### T-ADM-83 the same through real SQS (a dead attempt, then the retry) — only in tests/api-tests.sh
+
+### T-ADM-85 every scholarship (or ?status=draft|published|closed)
+GET {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer {{adminToken}}
+
+### T-ADM-86 one scholarship (seeded "Cloud Excellence Award")
+GET {{baseUrl}}/api/admin/scholarships/5eed1000-0000-4000-8000-000000000001
+Authorization: Bearer {{adminToken}}
+
+### T-ADM-87 its applications with scores, highest total first
+GET {{baseUrl}}/api/admin/scholarships/5eed1000-0000-4000-8000-000000000001/applications
+Authorization: Bearer {{adminToken}}
+
+### T-ADM-84 the same with a student token → 403
+GET {{baseUrl}}/api/admin/scholarships
+Authorization: Bearer {{studentToken}}
