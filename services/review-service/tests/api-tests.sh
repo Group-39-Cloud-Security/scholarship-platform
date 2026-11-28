@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # API tests for review-service with curl (the T-REV rows in docs/api-test-plan.md). Prints PASS/FAIL per check.
-# Owner: Mohamed Hazem. Run from the repo root after platform/deploy-all.sh:
+# Owner: Mohamed Hazem. Run from the repo root after platform/deploy-all.sh (which runs platform/seed.sh):
 #   bash services/review-service/tests/api-tests.sh
+# Logs in the seeded admin, student1 and reviewer2 with platform/get-token.sh (passwords in platform/.env).
+# reviewer2 because reviewer1 already holds a seeded claim, which would break the 5 claim test.
 # It first resets the test data (tests/local-test-data.sh) so every run starts the same.
 # Save the output as evidence:  bash services/review-service/tests/api-tests.sh | tee evidence/review-api-tests.txt
 # Options: --no-reset (keep the current data), API_URL=http://... to test another address.
@@ -22,6 +24,10 @@ if [ "$RESET" = yes ]; then
 fi
 echo "Testing $API_URL"
 echo
+
+ADMIN=$(bash "$ROOT/platform/get-token.sh" admin) && STUDENT=$(bash "$ROOT/platform/get-token.sh" student) \
+  && REVIEWER=$(bash "$ROOT/platform/get-token.sh" reviewer2) \
+  || { echo "Could not log in the seeded users: run platform/seed.sh (and check platform/.env)."; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -57,9 +63,9 @@ field() { grep -o "\"$1\":\"[^\"]*\"" "$BODY" | cut -d'"' -f4; }
 # ---------- queue ----------
 call GET /api/reviews/queue ""
 expect T-REV-01 "queue without a token -> 401" 401
-call GET /api/reviews/queue test-student-1
+call GET /api/reviews/queue "$STUDENT"
 expect T-REV-02 "queue as a student -> 403" 403
-call GET /api/reviews/queue test-reviewer
+call GET /api/reviews/queue "$REVIEWER"
 [ "$STATUS" = 200 ] && ! has '"essay"' && ! has '"studentEmail"' && ok=ok || ok=no
 result T-REV-03 "queue as a reviewer -> 200, no essay or email" $ok
 
@@ -71,25 +77,25 @@ if [ -z "$APP2" ]; then
 fi
 
 # ---------- claim ----------
-call POST /api/reviews test-reviewer "applicationId=$APP1" text/plain
+call POST /api/reviews "$REVIEWER" "applicationId=$APP1" text/plain
 expect T-REV-04 "claim with text/plain -> 415" 415
-call POST /api/reviews test-reviewer '{"applicationId":"../x"}'
+call POST /api/reviews "$REVIEWER" '{"applicationId":"../x"}'
 expect T-REV-05 "claim with an invalid id -> 400" 400
-call POST /api/reviews test-reviewer '{"applicationId":"00000000-0000-4000-8000-000000000000"}'
+call POST /api/reviews "$REVIEWER" '{"applicationId":"00000000-0000-4000-8000-000000000000"}'
 expect T-REV-06 "claim an unknown id -> 404" 404
-call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP1\",\"reviewerId\":\"someone-else\"}"
+call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$APP1\",\"reviewerId\":\"someone-else\"}"
 expect T-REV-07 "claim (reviewerId in the body is ignored) -> 201" 201
-call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP1\"}"
+call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$APP1\"}"
 expect T-REV-07b "claim the same one again -> 409" 409
 
-call GET /api/reviews/mine test-reviewer
+call GET /api/reviews/mine "$REVIEWER"
 [ "$STATUS" = 200 ] && has "$APP1" && ok=ok || ok=no
 result MINE "my reviews lists the claim -> 200" $ok
 
 # ---------- open ----------
-call GET "/api/reviews/$APP2" test-reviewer
+call GET "/api/reviews/$APP2" "$REVIEWER"
 expect T-REV-10 "open an application I didn't claim -> 404" 404
-call GET "/api/reviews/$APP1" test-reviewer
+call GET "/api/reviews/$APP1" "$REVIEWER"
 [ "$STATUS" = 200 ] && ! has '"studentEmail"' && ! has '"studentId"' && ok=ok || ok=no
 result OPEN "open my claim -> 200, no student id or email" $ok
 
@@ -102,46 +108,46 @@ done
 GOOD="{\"scores\":{${GOOD%,}},\"totalScore\":100}"
 BAD="{\"scores\":{${BAD%,}}}"
 
-call GET "/api/reviews/$APP1/pdf" test-reviewer
+call GET "/api/reviews/$APP1/pdf" "$REVIEWER"
 [ "$STATUS" = 200 ] && has '"expiresIn":300' && ok=ok || ok=no
 result T-REV-19 "PDF link -> 200, valid 5 minutes" $ok
 
 # ---------- score ----------
-call PUT "/api/reviews/$APP1" test-reviewer "$BAD"
+call PUT "/api/reviews/$APP1" "$REVIEWER" "$BAD"
 expect T-REV-11 "score out of range -> 400" 400
-call PUT "/api/reviews/$APP1" test-reviewer "$GOOD"
+call PUT "/api/reviews/$APP1" "$REVIEWER" "$GOOD"
 [ "$STATUS" = 200 ] && has '"totalScore":80' && ok=ok || ok=no
 result T-REV-12 "score -> 200, server total 80 (the 100 we sent is ignored)" $ok
-call PUT "/api/reviews/$APP1" test-reviewer "$GOOD"
+call PUT "/api/reviews/$APP1" "$REVIEWER" "$GOOD"
 expect T-REV-13 "score again -> 409 (final)" 409
 
 # ---------- release ----------
-call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP2\"}"
+call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$APP2\"}"
 expect CLAIM2 "claim a second application -> 201" 201
-call PUT "/api/reviews/$APP2" test-reviewer '{"flagged":true,"flagReason":"lazy"}'
+call PUT "/api/reviews/$APP2" "$REVIEWER" '{"flagged":true,"flagReason":"lazy"}'
 expect T-REV-14 "flag with a bad reason -> 400" 400
-call DELETE "/api/reviews/$APP2" test-student-1
+call DELETE "/api/reviews/$APP2" "$STUDENT"
 expect T-REV-18 "student tries to release -> 403" 403
-call DELETE "/api/reviews/$APP2" test-reviewer
+call DELETE "/api/reviews/$APP2" "$REVIEWER"
 expect T-REV-16 "release my claim -> 204" 204
-call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP2\"}"
-call DELETE "/api/reviews/$APP2" test-admin
+call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$APP2\"}"
+call DELETE "/api/reviews/$APP2" "$ADMIN"
 expect T-REV-17 "admin releases a claim -> 204" 204
-call DELETE "/api/reviews/$APP2" test-admin
+call DELETE "/api/reviews/$APP2" "$ADMIN"
 expect T-REV-17b "admin releases it again -> 409" 409
 
 # ---------- flag ----------
-call POST /api/reviews test-reviewer "{\"applicationId\":\"$APP2\"}"
-call PUT "/api/reviews/$APP2" test-reviewer '{"flagged":true,"flagReason":"ineligible","flagNote":"GPA in the PDF is lower"}'
+call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$APP2\"}"
+call PUT "/api/reviews/$APP2" "$REVIEWER" '{"flagged":true,"flagReason":"ineligible","flagNote":"GPA in the PDF is lower"}'
 [ "$STATUS" = 200 ] && has '"flagged":true' && has '"totalScore":null' && ok=ok || ok=no
 result T-REV-15 "flag -> 200, flagged with no score" $ok
 
 # ---------- atomic claim and the 5 claim limit ----------
-call GET /api/reviews/queue test-reviewer
+call GET /api/reviews/queue "$REVIEWER"
 LEFT=$(field applicationId)
 APP3=$(echo "$LEFT" | sed -n 1p)
 for i in 1 2 3 4 5; do   # 5 claims on the same application at the same moment
-  curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer test-reviewer" \
+  curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $REVIEWER" \
     -H "Content-Type: application/json" --data "{\"applicationId\":\"$APP3\"}" \
     "$API_URL/api/reviews" > "$TMP/parallel$i" &
 done
@@ -154,28 +160,28 @@ result T-REV-08 "5 claims at the same moment -> exactly one 201, four 409" $ok
 
 HELD="$APP3"
 for id in $(echo "$LEFT" | sed -n 2,5p); do   # 4 more, so I hold 5
-  call POST /api/reviews test-reviewer "{\"applicationId\":\"$id\"}"
+  call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$id\"}"
   [ "$STATUS" = 201 ] && HELD="$HELD $id"
 done
 SIXTH=$(echo "$LEFT" | sed -n 6p)
 if [ -n "$SIXTH" ] && [ "$(echo $HELD | wc -w)" -eq 5 ]; then
-  call POST /api/reviews test-reviewer "{\"applicationId\":\"$SIXTH\"}"
+  call POST /api/reviews "$REVIEWER" "{\"applicationId\":\"$SIXTH\"}"
   expect T-REV-09 "6th claim while holding 5 -> 409" 409
 else
   STATUS="only $(echo $HELD | wc -w) claims, need 6 in the queue"; echo "" > "$BODY"
   result T-REV-09 "6th claim while holding 5 -> 409" no
 fi
-for id in $HELD; do call DELETE "/api/reviews/$id" test-reviewer; done   # give them back
+for id in $HELD; do call DELETE "/api/reviews/$id" "$REVIEWER"; done   # give them back
 
 # ---------- browser and headers ----------
 call OPTIONS /api/reviews/queue "" "" "" "Origin: http://localhost:4566" \
   "Access-Control-Request-Method: GET" "Access-Control-Request-Headers: authorization"
 [ "$STATUS" = 204 ] && header "access-control-allow-origin: http://localhost:4566" && ok=ok || ok=no
 result T-REV-21 "preflight from our website -> 204, origin allowed" $ok
-call GET /api/reviews/queue test-reviewer "" "" "Origin: http://evil.example"
+call GET /api/reviews/queue "$REVIEWER" "" "" "Origin: http://evil.example"
 [ "$STATUS" = 200 ] && ! header "access-control-allow-origin" && ok=ok || ok=no
 result T-REV-22 "other website -> no CORS header" $ok
-call GET /api/reviews/queue test-reviewer
+call GET /api/reviews/queue "$REVIEWER"
 header "x-content-type-options: nosniff" && header "x-frame-options: DENY" \
   && header "content-security-policy: default-src 'none'" && header "cache-control: no-store" \
   && ! header "x-powered-by" && ok=ok || ok=no

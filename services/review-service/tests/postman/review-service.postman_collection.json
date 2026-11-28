@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "e6fe07fc-af1b-4aff-a509-9c9ea5cc58b8",
     "name": "review-service",
-    "description": "Mohamed Hazem - review-service tests. Run bash services/review-service/tests/local-test-data.sh first, then run the collection in order.",
+    "description": "Mohamed Hazem - review-service tests. Run bash services/review-service/tests/local-test-data.sh first. Set token to the output of bash platform/get-token.sh reviewer2 and studentToken to bash platform/get-token.sh student (tokens last 1 hour, don't save them in the file), then run the collection in order.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -80,7 +80,7 @@
           "bearer": [
             {
               "key": "token",
-              "value": "test-student-1",
+              "value": "{{studentToken}}",
               "type": "string"
             }
           ]
@@ -571,7 +571,7 @@
           "bearer": [
             {
               "key": "token",
-              "value": "test-student-1",
+              "value": "{{studentToken}}",
               "type": "string"
             }
           ]
@@ -725,11 +725,15 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://70d1dc19fa.execute-api.localhost.floci.io:4566"
+      "value": "http://API_ID.execute-api.localhost.floci.io:4566"
     },
     {
       "key": "token",
-      "value": "test-reviewer"
+      "value": ""
+    },
+    {
+      "key": "studentToken",
+      "value": ""
     },
     {
       "key": "appId",
