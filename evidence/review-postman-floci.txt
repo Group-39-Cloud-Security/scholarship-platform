@@ -1,0 +1,110 @@
+Need to install the following packages:
+newman@6.2.3
+Ok to proceed? (y) newman
+
+review-service
+
+→ Queue without a token
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/queue [401 Unauthorized, 541B, 42ms]
+  √  status is 401
+
+→ Queue as a student
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/queue [403 Forbidden, 555B, 22ms]
+  √  status is 403
+
+→ Queue
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/queue [200 OK, 2.24kB, 19ms]
+  √  status is 200
+  √  no essays or emails in the list
+
+→ Claim with a text body
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [415 Unsupported Media Type, 581B, 14ms]
+  √  status is 415
+
+→ Claim an unknown application
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [404 Not Found, 551B, 19ms]
+  √  status is 404
+
+→ Claim
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [201 Created, 631B, 20ms]
+  √  status is 201
+
+→ Claim again
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [409 Conflict, 589B, 22ms]
+  √  status is 409
+
+→ My reviews
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/mine [200 OK, 930B, 20ms]
+  √  status is 200
+
+→ Open my application
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 [200 OK, 1.48kB, 18ms]
+  √  status is 200
+  √  no student id or email
+
+→ Open an application I didn't claim
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 [404 Not Found, 551B, 15ms]
+  √  status is 404
+
+→ PDF link
+  GET http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71/pdf [200 OK, 1.18kB, 28ms]
+  √  status is 200
+  √  link lasts 5 minutes
+
+→ Score out of range
+  PUT http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 [400 Bad Request, 582B, 18ms]
+  √  status is 400
+
+→ Score
+  PUT http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 [200 OK, 678B, 23ms]
+  √  status is 200
+  √  total is calculated by the server (70, not 100)
+
+→ Score again
+  PUT http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e71 [409 Conflict, 582B, 15ms]
+  √  status is 409
+
+→ Claim the second one
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [201 Created, 631B, 23ms]
+  √  status is 201
+
+→ Release as a student
+  DELETE http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 [403 Forbidden, 555B, 18ms]
+  √  status is 403
+
+→ Release
+  DELETE http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 [204 No Content, 407B, 21ms]
+  √  status is 204
+
+→ Claim the second one again
+  POST http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews [201 Created, 631B, 21ms]
+  √  status is 201
+
+→ Flag with a wrong reason
+  PUT http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 [400 Bad Request, 617B, 14ms]
+  √  status is 400
+
+→ Flag
+  PUT http://0325675dbf.execute-api.localhost.floci.io:4566/api/reviews/4f1c2b9e-7a3d-4e21-9c55-1b2a6f0d8e72 [200 OK, 658B, 23ms]
+  √  status is 200
+  √  flagged with no score
+
+┌─────────────────────────┬──────────────────┬──────────────────┐
+│                         │         executed │           failed │
+├─────────────────────────┼──────────────────┼──────────────────┤
+│              iterations │                1 │                0 │
+├─────────────────────────┼──────────────────┼──────────────────┤
+│                requests │               20 │                0 │
+├─────────────────────────┼──────────────────┼──────────────────┤
+│            test-scripts │               20 │                0 │
+├─────────────────────────┼──────────────────┼──────────────────┤
+│      prerequest-scripts │                0 │                0 │
+├─────────────────────────┼──────────────────┼──────────────────┤
+│              assertions │               25 │                0 │
+├─────────────────────────┴──────────────────┴──────────────────┤
+│ total run duration: 2s                                        │
+├───────────────────────────────────────────────────────────────┤
+│ total data received: 5.78kB (approx)                          │
+├───────────────────────────────────────────────────────────────┤
+│ average response time: 20ms [min: 14ms, max: 42ms, s.d.: 5ms] │
+└───────────────────────────────────────────────────────────────┘

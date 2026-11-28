@@ -1,62 +1,76 @@
-E2E run 2026-11-27T23:55:55Z against http://fbcea3fe0c.execute-api.localhost.floci.io:4566
-code at hazem-e2e 9c4110c
+E2E run 2026-11-28T13:08:14Z against http://0325675dbf.execute-api.localhost.floci.io:4566
+code at hazem-e2e 9f2e942
 
-=== 0. health
+=== 0. health, and the old test tokens are gone
 GET /api/health | expected 200 | got 200
 {"status":"ok","environment":"production","runtime":"lambda"}
+GET /api/admin/stats with the old Bearer test-admin | expected 401 | got 401
+{"error":{"code":"UNAUTHENTICATED","message":"Login required."}}
 
-=== 1. admin creates a reviewer (test-admin token)
+=== 1. admin logs in
+GET /api/auth/me (seeded admin) | expected 200, role admin | got 200
+{"userId":"5eed0000-0000-4000-8000-000000000001","email":"admin@example-university.edu","name":"Platform Admin","role":"admin","status":"active","mustChangePassword":false}
+
+=== 1b. admin creates a reviewer
 POST /api/admin/users | expected 201, role reviewer, mustChangePassword true | got 201
-{"userId":"7ffb8bfa-2a70-43d0-bd57-bcb96e5fea47","email":"e2e.reviewer.1795823755@example-university.edu","name":"E2E Reviewer","role":"reviewer","status":"active","mustChangePassword":true,"createdAt":"2026-11-27T23:55:55.863Z","temporaryPassword":"<hidden>"}
+{"userId":"82156f9b-c427-4bb3-97f3-e514457c03ad","email":"e2e.reviewer.1795871294@example-university.edu","name":"E2E Reviewer","role":"reviewer","status":"active","mustChangePassword":true,"createdAt":"2026-11-28T13:08:24.193Z","temporaryPassword":"<hidden>"}
 
-=== 1b. admin creates and publishes a scholarship
+=== 1c. admin creates and publishes a scholarship
 POST /api/admin/scholarships | expected 201 draft | got 201
-scholarshipId=892d3f98-721a-4b36-b6b1-f7a57d38d24f
+scholarshipId=38baec03-7583-4bee-b6cc-7e46d5a6b8a6
 PATCH /api/admin/scholarships/{id}/status published | expected 200 published | got 200
-{"scholarshipId":"892d3f98-721a-4b36-b6b1-f7a57d38d24f","title":"E2E Cloud Award","description":"End-to-end test scholarship.","deadline":"2027-06-30T23:59:00.000Z","awards":1,"rubric":[{"criterionId":"academic","name":"Academic record","description":"Grades and transcript","weight":40},{"criterionId":"essay","name":"Essay","description":"Clarity and motivation","weight":40},{"criterionId":"need","name":"Financial need","description":"Evidence of need","weight":20}],"eligibility":{"allowedDomains":["example-university.edu"],"minGpa":3,"years":[2,3]},"status":"published","acceptedCount":0,"createdBy":"test-admin","createdAt":"2026-11-27T23:55:56.261Z"}
+{"scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","title":"E2E Cloud Award 1795871294","description":"End-to-end test scholarship.","deadline":"2027-06-30T23:59:00.000Z","awards":1,"rubric":[{"criterionId":"academic","name":"Academic record","description":"Grades and transcript","weight":40},{"criterionId":"essay","name":"Essay","description":"Clarity and motivation","weight":40},{"criterionId":"need","name":"Financial need","description":"Evidence of need","weight":20}],"eligibility":{"allowedDomains":["example-university.edu"],"minGpa":3,"years":[2,3]},"status":"published","acceptedCount":0,"createdBy":"5eed0000-0000-4000-8000-000000000001","createdAt":"2026-11-28T13:08:24.687Z"}
 
 === 2. student registers and logs in
-POST /api/auth/register | expected 201 (blocked if auth-service is not deployed) | got 404
-{"message":"Not Found"}
-POST /api/auth/login | expected 200 with a token (blocked if auth-service is not deployed) | got 404
-{"message":"Not Found"}
-using test-student-1 (student1@example-university.edu) for the student steps
+POST /api/auth/register | expected 201, role student | got 201
+{"userId":"086b6b22-b65f-4e5f-8067-cfe92738063a","email":"e2e.student.1795871294@example-university.edu","name":"E2E Student","role":"student","status":"active","mustChangePassword":false,"createdAt":"2026-11-28T13:08:25.907Z"}
+POST /api/auth/login (student) | expected 200 with a token | got 200
+{"token":"<hidden>","user":{"userId":"086b6b22-b65f-4e5f-8067-cfe92738063a","email":"e2e.student.1795871294@example-university.edu","name":"E2E Student","role":"student","status":"active","mustChangePassword":false}}
 
 === 3. student applies
 POST /api/applications | expected 201 submitted | got 201
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","scholarshipId":"892d3f98-721a-4b36-b6b1-f7a57d38d24f","status":"submitted","submittedAt":"2026-11-27T23:55:57.731Z"}
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","status":"submitted","submittedAt":"2026-11-28T13:08:31.141Z"}
 
-=== 4. reviewer logs in, sees the application and reviews it
-POST /api/auth/login (new reviewer) | expected 200 (blocked if auth-service is not deployed) | got 404
-{"message":"Not Found"}
-using test-reviewer for the reviewer steps
-queue contains 0f81f510-5c23-4cf1-aa3d-f1762d864c91
+=== 4. reviewer logs in with the temporary password and has to change it
+POST /api/auth/login (new reviewer, temporary password) | expected 200, mustChangePassword true | got 200
+{"token":"<hidden>","user":{"userId":"82156f9b-c427-4bb3-97f3-e514457c03ad","email":"e2e.reviewer.1795871294@example-university.edu","name":"E2E Reviewer","role":"reviewer","status":"active","mustChangePassword":true}}
+GET /api/reviews/queue before changing the password | expected 403 | got 403
+{"error":{"code":"FORBIDDEN","message":"Change your temporary password first."}}
+PUT /api/auth/password | expected 200, mustChangePassword false | got 200
+{"userId":"82156f9b-c427-4bb3-97f3-e514457c03ad","email":"e2e.reviewer.1795871294@example-university.edu","name":"E2E Reviewer","role":"reviewer","status":"active","mustChangePassword":false}
+POST /api/auth/login (reviewer, new password) | expected 200 with a token | got 200
+{"token":"<hidden>","user":{"userId":"82156f9b-c427-4bb3-97f3-e514457c03ad","email":"e2e.reviewer.1795871294@example-university.edu","name":"E2E Reviewer","role":"reviewer","status":"active","mustChangePassword":false}}
+
+=== 4b. reviewer sees the application and reviews it
 GET /api/reviews/queue | expected 200 and the new application is in it | got 200
+queue contains 266bdf18-7c82-401d-84af-8a2117427002
 POST /api/reviews (claim) | expected 201 under_review | got 201
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","status":"under_review","claimedAt":"2026-11-27T23:55:58.765Z","expiresAt":"2026-11-29T23:55:58.765Z"}
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","status":"under_review","claimedAt":"2026-11-28T13:08:34.140Z","expiresAt":"2026-11-30T13:08:34.140Z"}
 GET /api/reviews/{id} | expected 200 with the essay and the rubric, no student email | got 200
 no student email in the response
 PUT /api/reviews/{id} | expected 200 reviewed, totalScore 70 | got 200
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","status":"reviewed","flagged":false,"flagReason":null,"scores":{"academic":8,"essay":7,"need":5},"totalScore":70,"submittedAt":"2026-11-27T23:55:59.416Z"}
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","status":"reviewed","flagged":false,"flagReason":null,"scores":{"academic":8,"essay":7,"need":5},"totalScore":70,"submittedAt":"2026-11-28T13:08:34.840Z"}
 
 === 5. student checks the status
 GET /api/applications/mine | expected 200, this application is reviewed | got 200
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","scholarshipId":"892d3f98-721a-4b36-b6b1-f7a57d38d24f","scholarshipTitle":"E2E Cloud Award","deadline":"2027-06-30T23:59:00.000Z","status":"reviewed","gpa":3.4,"yearOfStudy":2,"submittedAt":"2026-11-27T23:55:57.731Z","timeline":[{"step":"submitted","label":"Application submitted","done":true,"at":"2026-11-27T23:55:57.731Z"},{"step":"under_review","label":"Being reviewed","done":true},{"step":"reviewed","label":"Review finished","done":true},{"step":"decision","label":"Decision","done":false}]
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","scholarshipTitle":"E2E Cloud Award 1795871294","deadline":"2027-06-30T23:59:00.000Z","status":"reviewed","gpa":3.4,"yearOfStudy":2,"submittedAt":"2026-11-28T13:08:31.141Z","timeline":[{"step":"submitted","label":"Application submitted","done":true,"at":"2026-11-28T13:08:31.141Z"},{"step":"under_review","label":"Being reviewed","done":true},{"step":"reviewed","label":"Review finished","done":true},{"step":"decision","label":"Decision","done":false}]
 
 
 === 5b. admin decides
 PATCH /api/admin/applications/{id}/decision accepted | expected 200 accepted, email queued | got 200
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","scholarshipId":"892d3f98-721a-4b36-b6b1-f7a57d38d24f","status":"accepted","decidedBy":"test-admin","decidedAt":"2026-11-27T23:56:00.087Z","emailStatus":"queued"}
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","status":"accepted","decidedBy":"5eed0000-0000-4000-8000-000000000001","decidedAt":"2026-11-28T13:08:35.561Z","emailStatus":"queued"}
 GET /api/applications/mine again | expected 200, this application is accepted | got 200
-{"applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","scholarshipId":"892d3f98-721a-4b36-b6b1-f7a57d38d24f","scholarshipTitle":"E2E Cloud Award","deadline":"2027-06-30T23:59:00.000Z","status":"accepted","gpa":3.4,"yearOfStudy":2,"submittedAt":"2026-11-27T23:55:57.731Z","decidedAt":"2026-11-27T23:56:00.087Z","timeline":[{"step":"submitted","label":"Application submitted","done":true,"at":"2026-11-27T23:55:57.731Z"},{"step":"under_review","label":"Being reviewed","done":true},{"step":"reviewed","label":"Review finished","done":true},{"step":"decision","label":"Decision: accepted","done":true,"at":"2026-11-27T23:56:00.087Z"}]
+{"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","scholarshipTitle":"E2E Cloud Award 1795871294","deadline":"2027-06-30T23:59:00.000Z","status":"accepted","gpa":3.4,"yearOfStudy":2,"submittedAt":"2026-11-28T13:08:31.141Z","decidedAt":"2026-11-28T13:08:35.561Z","timeline":[{"step":"submitted","label":"Application submitted","done":true,"at":"2026-11-28T13:08:31.141Z"},{"step":"under_review","label":"Being reviewed","done":true},{"step":"reviewed","label":"Review finished","done":true},{"step":"decision","label":"Decision: accepted","done":true,"at":"2026-11-28T13:08:35.561Z"}]
 
 
-=== 6. notification
+=== 6. notification and audit log
 waiting 20 s for notification-sender...
-2026-11-27T23:56:00.766Z
-bb6c974a-5322-4d97-9c21-94b3e02325d0
+2026-11-28T13:08:39.035Z
+311020eb-7d24-4211-95ad-8b1cc8fd1da8
 ERROR
-{"level":"error","fn":"notification-sender","message":"decision email failed","applicationId":"0f81f510-5c23-4cf1-aa3d-f1762d864c91","attempt":1,"lastAttempt":false,"error":"ParameterNotFound"}
-audit log has the decision for 0f81f510-5c23-4cf1-aa3d-f1762d864c91
+{"level":"error","fn":"notification-sender","message":"decision email failed","applicationId":"266bdf18-7c82-401d-84af-8a2117427002","attempt":1,"lastAttempt":false,"error":"ParameterNotFound"}
+audit log has the decision for 266bdf18-7c82-401d-84af-8a2117427002
+audit log has the claim for 266bdf18-7c82-401d-84af-8a2117427002
+audit log has the reviewer's blocked call before the password change
 
 E2E run finished
