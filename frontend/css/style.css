@@ -34,3 +34,7 @@ main.narrow { max-width: 28rem; }
 .timeline { padding-left: 1.25rem; }
 .timeline li.done { font-weight: 600; }
 .timeline li.todo { color: #666; }
+.search { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0 1rem; }
+.search label { margin: 0; }
+.search input { flex: 1 1 12rem; padding: .3rem; }
+td.num { white-space: nowrap; }
