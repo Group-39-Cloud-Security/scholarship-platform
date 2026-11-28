@@ -15,54 +15,54 @@ Branch `hazem-e2e` at `9f2e942`, which is `main` after the auth-service, the fro
 ## Steps
 
 ### 0. Health check, and the old test tokens are gone
-`GET /api/health` with no token: **200**, `runtime: lambda`. Pass.
-`GET /api/admin/stats` with the old `Bearer test-admin`: **401** `Login required.` So the phase-A test users don't work anymore. Pass.
+`GET /api/health` with no token: 200, `runtime: lambda`. Pass.
+`GET /api/admin/stats` with the old `Bearer test-admin`: 401 `Login required.` So the phase-A test users don't work anymore. Pass.
 
 ### 1. Admin logs in
-Logged in as `admin@example-university.edu`, then `GET /api/auth/me`: **200**, role admin. Pass.
+Logged in as `admin@example-university.edu`, then `GET /api/auth/me`: 200, role admin. Pass.
 
 ### 1b. Admin creates a reviewer
 `POST /api/admin/users` with `{ "email": "e2e.reviewer.1795871294@example-university.edu", "name": "E2E Reviewer" }`.
-Expected 201, role reviewer, must change password. Got **201**, `mustChangePassword: true`. The temporary password came back in the response and the script hid it before printing. Pass.
+Expected 201, role reviewer, must change password. Got 201, `mustChangePassword: true`. The temporary password came back in the response and the script hid it before printing. Pass.
 
 ### 1c. Admin creates and publishes a scholarship
-`POST /api/admin/scholarships` (rubric academic 40 / essay 40 / need 20, eligibility example-university.edu, GPA 3+, years 2-3): **201** draft, id `38baec03-7583-4bee-b6cc-7e46d5a6b8a6`.
-`PATCH /api/admin/scholarships/{id}/status` published: **200**, `createdBy` is the seeded admin's id. Pass.
+`POST /api/admin/scholarships` (rubric academic 40 / essay 40 / need 20, eligibility example-university.edu, GPA 3+, years 2-3): 201 draft, id `38baec03-7583-4bee-b6cc-7e46d5a6b8a6`.
+`PATCH /api/admin/scholarships/{id}/status` published: 200, `createdBy` is the seeded admin's id. Pass.
 
 ### 2. Student registers and logs in
-`POST /api/auth/register` with `e2e.student.1795871294@example-university.edu`: **201**, role student.
-`POST /api/auth/login`: **200** with a token. Pass.
+`POST /api/auth/register` with `e2e.student.1795871294@example-university.edu`: 201, role student.
+`POST /api/auth/login`: 200 with a token. Pass.
 
 ### 3. Student applies
-`POST /api/applications` with a 221-word essay, GPA 3.4, year 2 and a small PDF. Got **201**:
+`POST /api/applications` with a 221-word essay, GPA 3.4, year 2 and a small PDF. Got 201:
 ```json
 {"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","scholarshipId":"38baec03-7583-4bee-b6cc-7e46d5a6b8a6","status":"submitted","submittedAt":"2026-11-28T13:08:31.141Z"}
 ```
 Pass.
 
 ### 4. Reviewer logs in with the temporary password
-- `POST /api/auth/login` with the temporary password: **200**, `mustChangePassword: true`.
-- `GET /api/reviews/queue` with that token: **403** `Change your temporary password first.` Good, he can't do anything yet.
-- `PUT /api/auth/password` with the temporary password and a new one: **200**, `mustChangePassword: false`.
-- Logged in again with the new password: **200** with a token.
+- `POST /api/auth/login` with the temporary password: 200, `mustChangePassword: true`.
+- `GET /api/reviews/queue` with that token: 403 `Change your temporary password first.` Good, he can't do anything yet.
+- `PUT /api/auth/password` with the temporary password and a new one: 200, `mustChangePassword: false`.
+- Logged in again with the new password: 200 with a token.
 Pass.
 
 ### 4b. Reviewer reviews the application
-- `GET /api/reviews/queue`: **200**, the new application is in the queue.
-- `POST /api/reviews` (claim): **201**, `under_review`, `expiresAt` 48 h later.
-- `GET /api/reviews/{id}`: **200**, essay and rubric, no student email in the response.
-- `PUT /api/reviews/{id}` with academic 8, essay 7, need 5. Expected total 70. Got **200**:
+- `GET /api/reviews/queue`: 200, the new application is in the queue.
+- `POST /api/reviews` (claim): 201, `under_review`, `expiresAt` 48 h later.
+- `GET /api/reviews/{id}`: 200, essay and rubric, no student email in the response.
+- `PUT /api/reviews/{id}` with academic 8, essay 7, need 5. Expected total 70. Got 200:
 ```json
 {"applicationId":"266bdf18-7c82-401d-84af-8a2117427002","status":"reviewed","flagged":false,"flagReason":null,"scores":{"academic":8,"essay":7,"need":5},"totalScore":70,"submittedAt":"2026-11-28T13:08:34.840Z"}
 ```
 Pass.
 
 ### 5. Student checks the status
-`GET /api/applications/mine`: **200**, `status: reviewed`, timeline shows submitted, being reviewed and review finished as done. Pass.
+`GET /api/applications/mine`: 200, `status: reviewed`, timeline shows submitted, being reviewed and review finished as done. Pass.
 
 ### 5b. Admin decides, student checks again
-`PATCH /api/admin/applications/{id}/decision` accepted: **200**, `decidedBy` is the seeded admin, `emailStatus: queued`.
-`GET /api/applications/mine` again: **200**, `status: accepted`, timeline "Decision: accepted". Pass.
+`PATCH /api/admin/applications/{id}/decision` accepted: 200, `decidedBy` is the seeded admin, `emailStatus: queued`.
+`GET /api/applications/mine` again: 200, `status: accepted`, timeline "Decision: accepted". Pass.
 
 ### 6. Notification and audit log
 Waited 20 s and read the notification-sender log for this application:
@@ -95,7 +95,7 @@ notification-sender picked the message up about 3.5 seconds after the decision (
 
 ## Other runs on the same deploy
 
-- `bash services/review-service/tests/api-tests.sh` (real tokens: admin, student1, reviewer2): the first run gave 27 passed, 1 failed. T-REV-20 (the expiry job) returned `checked 0`. I checked the table and the old claim was there, then ran the job by hand and it released it (`checked 1, released 1`). I ran the whole file again and got **28 passed, 0 failed** (`evidence/review-api-tests-floci.txt`). It only happened on the first run after the fresh deploy and I couldn't make it happen again.
+- `bash services/review-service/tests/api-tests.sh` (real tokens: admin, student1, reviewer2): the first run gave 27 passed, 1 failed. T-REV-20 (the expiry job) returned `checked 0`. I checked the table and the old claim was there, then ran the job by hand and it released it (`checked 1, released 1`). I ran the whole file again and got 28 passed, 0 failed (`evidence/review-api-tests-floci.txt`). It only happened on the first run after the fresh deploy and I couldn't make it happen again.
 - Postman collection with newman (reviewer2 and student1 tokens): 20 requests, 25 assertions, 0 failed (`evidence/review-postman-floci.txt`).
 
 ## Notes
