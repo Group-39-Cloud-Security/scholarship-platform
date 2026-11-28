@@ -1,2 +1,49 @@
-<!-- index.html — login + register page. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only) -->
-<!-- TODO: login form, register form, error message area; scripts: js/config.js, js/api.js, js/auth.js -->
+<!-- index.html — login + student registration. Owner: Mohamed Khalil (shared shell). Rules: CLAUDE.md §10 (textContent only, token in sessionStorage) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- CSP: only our own scripts and styles can load, and the page can only call our API (same policy as the reviewer pages) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Log in | Scholarship Platform</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+  </header>
+  <main class="narrow">
+    <h1>Log in</h1>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <form id="login-form" class="form" novalidate>
+      <label for="email">University email</label>
+      <input id="email" type="email" autocomplete="username" maxlength="254" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" maxlength="200" required>
+      <p><button type="submit">Log in</button></p>
+    </form>
+
+    <section class="box">
+      <h2>New student?</h2>
+      <p class="hint">Register with your partner university email. Reviewer accounts are created by an admin.</p>
+      <form id="register-form" class="form" novalidate>
+        <label for="reg-name">Full name</label>
+        <input id="reg-name" type="text" autocomplete="name" minlength="2" maxlength="60" required>
+        <label for="reg-email">University email</label>
+        <input id="reg-email" type="email" autocomplete="email" maxlength="254" required>
+        <label for="reg-password">Password (at least 10 characters)</label>
+        <input id="reg-password" type="password" autocomplete="new-password" minlength="10" maxlength="72" required>
+        <p><button type="submit" class="secondary">Register</button></p>
+      </form>
+    </section>
+  </main>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>

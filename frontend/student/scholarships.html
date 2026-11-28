@@ -1,2 +1,37 @@
-<!-- student/scholarships.html — Owner: Mohamed Khalil. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- student/scholarships.html — Owner: Mohamed Khalil. Published scholarships with search; Apply opens apply.html. Calls the API via ../js/api.js; textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Scholarships | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>Scholarships</h1>
+    <form id="search-form" class="search" role="search" novalidate>
+      <label for="search">Search title or description</label>
+      <input id="search" type="search" maxlength="100">
+      <button type="submit">Search</button>
+    </form>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p id="empty" hidden>No published scholarships match.</p>
+    <table id="scholarships" hidden>
+      <thead><tr><th>Scholarship</th><th>Deadline</th><th>Awards</th><th>Who can apply</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="scholarships.js"></script>
+</body>
+</html>

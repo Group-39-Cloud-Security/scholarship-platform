@@ -1,2 +1,33 @@
-<!-- student/my-applications.html — Owner: Mohamed Khalil. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- student/my-applications.html — Owner: Mohamed Khalil. The student's own applications. Calls the API via ../js/api.js; textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>My applications | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>My applications</h1>
+    <p class="hint">You can have up to 3 active applications. You can withdraw one only before a reviewer picks it up.</p>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p id="empty" hidden>You have not applied for any scholarship yet.</p>
+    <table id="applications" hidden>
+      <thead><tr><th>Scholarship</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="my-applications.js"></script>
+</body>
+</html>
