@@ -1,8 +1,8 @@
 // reviewer-common.js - helpers shared by the three reviewer pages
 // Owner: Mohamed Hazem   ·   Rules: CLAUDE.md §10 (textContent only, token in sessionStorage, 401 goes back to login)
 //
-// The shared js/api.js and js/auth.js are not built yet (Phase C), so the reviewer pages use these helpers.
-// Everything is inside ReviewerUI so the names can't clash with the shared files later.
+// I wrote these before the shared js/api.js and js/auth.js existed. They use the same 'token' key, so one login
+// works for every page. Everything is inside ReviewerUI so the names can't clash with the shared files.
 // Pages are only built with createElement + textContent, never innerHTML, so text from the database
 // (essays, titles) is always shown as text and never run as HTML.
 

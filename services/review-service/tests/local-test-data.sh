@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Test data for testing review-service on your own Floci in Phase A, before the other services exist.
-# Only for local testing, the real test data is platform/seed.sh. Run from the repo root AFTER deploy-all.sh:
+# Extra test data for review-service on your own Floci. I wrote it before the other services existed, and
+# api-tests.sh still uses it so every run starts from the same queue. The demo data is platform/seed.sh.
+# Run from the repo root AFTER deploy-all.sh:
 #   bash services/review-service/tests/local-test-data.sh
 # Creates (only if missing) the Applications and Scholarships tables exactly as CLAUDE.md section 5 describes,
 # the private scholarship-documents bucket, 1 scholarship with a rubric, 8 submitted applications with a small PDF,
 # and 1 claim that is 49 hours old (to test the release-expired-claims job).
-# When Khalil's and Wael's parts are ready: bash platform/reset.sh && bash platform/deploy-all.sh (wipes all of this).
+# bash platform/reset.sh -y removes all of it.
 set -e
 export AWS_PROFILE=floci MSYS_NO_PATHCONV=1 AWS_PAGER=""
 aws sts get-caller-identity --query Account --output text | grep -q 000000000000 \
@@ -61,7 +62,7 @@ cat > "$TMP/sch.json" <<EOF
     {"M": {"criterionId": {"S": "need"}, "name": {"S": "Financial need"}, "description": {"S": "Evidence of need"}, "weight": {"N": "20"}}}
   ]},
   "eligibility": {"M": {"allowedDomains": {"L": [{"S": "example-university.edu"}]}, "minGpa": {"N": "3"}, "years": {"L": [{"N": "2"}, {"N": "3"}]}}},
-  "createdBy": {"S": "test-admin"}, "createdAt": {"S": "2026-11-01T10:00:00.000Z"}
+  "createdBy": {"S": "review-test-data"}, "createdAt": {"S": "2026-11-01T10:00:00.000Z"}
 }
 EOF
 aws dynamodb put-item --table-name Scholarships --item "file://$TMP/sch.json"
@@ -72,7 +73,7 @@ printf '%%PDF-1.4\n%% test application document\n' > "$TMP/test.pdf"
 add_app() { # $1 id, $2 status, $3 submittedAt, $4 extra attributes (JSON fragment, may be empty)
   cat > "$TMP/app.json" <<EOF
 {
-  "applicationId": {"S": "$1"}, "studentId": {"S": "test-student-1"}, "studentEmail": {"S": "student1@example-university.edu"},
+  "applicationId": {"S": "$1"}, "studentId": {"S": "review-test-student"}, "studentEmail": {"S": "review.test@example-university.edu"},
   "scholarshipId": {"S": "$SCH"},
   "essay": {"S": "I am a second year computer science student. This is a test essay for application $1.\n\nI want this scholarship because..."},
   "gpa": {"N": "3.4"}, "yearOfStudy": {"N": "2"}, "pdfKey": {"S": "applications/$1.pdf"},
