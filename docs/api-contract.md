@@ -512,6 +512,29 @@ or
 `status` other than `published` / `closed` (including `draft`) → `400`. The status change is one conditional update, so of several publishes sent at the same time exactly one succeeds and the rest get `409`.
 `400`, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`, `409`, `415`
 
+### GET /api/admin/scholarships?status=  [admin]
+Every scholarship, or only one `status` (`draft`, `published`, `closed`; anything else → `400`). One Query per status on `status-deadline-index`, never a Scan. Newest first (`createdAt`).
+`200` (no match is `[]`): a list of whole scholarships, each as in the `POST` response.
+`400`, `401`, `403`
+
+### GET /api/admin/scholarships/{id}  [admin]
+`200` the whole scholarship, as in the `POST` response (the edit page fills its form from it).
+`400` id is not a UUID, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`
+
+### GET /api/admin/scholarships/{id}/applications  [admin]  (with scores, sorted by total)
+One Query on Applications `scholarshipId-index` (application-service's lock rows have no `scholarshipId`, so they are never in it), plus one Reviews `GetItem` per reviewed, accepted or rejected application. Never the essay or the PDF key.
+`200`
+```json
+{
+  "scholarship": { "scholarshipId": "3586ae3a-2131-44c1-aaeb-eae0bff6fa44", "title": "Cloud Excellence Award", "status": "published", "awards": 2, "acceptedCount": 0 },
+  "applications": [
+    { "applicationId": "4123d54c-19de-4551-8f8b-5f88bf29438e", "studentEmail": "student4@example-university.edu", "status": "reviewed", "submittedAt": "2026-11-27T12:36:07.000Z", "gpa": 3.4, "yearOfStudy": 2, "reviewerId": "5eed0000-0000-4000-8000-000000000002", "claimedAt": "2026-11-27T18:36:07.000Z", "flagged": false, "totalScore": 72, "scores": { "academic": 8, "essay": 7, "need": 6 }, "flagReason": null, "flagNote": null, "reviewedAt": "2026-11-27T20:36:07.000Z" }
+  ]
+}
+```
+Highest `totalScore` first; flagged and not-yet-reviewed ones (`totalScore: null`) after, oldest first. Decided ones also carry `decidedAt`, `decidedBy` and `emailStatus`. `flagNote` is the reviewer's note for the admin (students never see it).
+`400` id is not a UUID, `401`, `403`, `404 SCHOLARSHIP_NOT_FOUND`
+
 ### PATCH /api/admin/applications/{id}/decision  [admin]  (accept or reject, then queue the email)
 ```json
 { "decision": "accepted" }

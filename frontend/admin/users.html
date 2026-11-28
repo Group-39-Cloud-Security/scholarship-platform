@@ -1,2 +1,59 @@
-<!-- admin/users.html — Owner: Mohamed Wael. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- admin/users.html — Owner: Mohamed Wael. List accounts, create a reviewer, disable or enable (GET/POST /api/admin/users, PATCH .../status). textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Users | Admin | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>Users</h1>
+    <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <h2>Create a reviewer</h2>
+    <form id="create" class="inline" novalidate>
+      <label>Email <input id="email" type="email" maxlength="254" autocomplete="off"></label>
+      <label>Name <input id="name" maxlength="60" autocomplete="off"></label>
+      <button type="submit" id="create-btn">Create reviewer</button>
+    </form>
+    <section id="temp" class="box" hidden>
+      <p><strong>Temporary password for <span id="temp-email"></span>:</strong> <span id="temp-password" class="secret"></span></p>
+      <p class="hint">Shown only this once; it is not stored anywhere. Give it to the reviewer privately. They must change it at their first login before they can do anything else.</p>
+      <button type="button" id="temp-hide" class="secondary">I have passed it on, hide it</button>
+    </section>
+
+    <h2>Accounts</h2>
+    <form id="filters" class="inline" novalidate>
+      <label>Role
+        <select id="role"><option value="">Any</option><option value="student">Student</option><option value="reviewer">Reviewer</option><option value="admin">Admin</option></select>
+      </label>
+      <label>Status
+        <select id="status"><option value="">Any</option><option value="active">Active</option><option value="disabled">Disabled</option></select>
+      </label>
+      <button type="submit">Show</button>
+    </form>
+    <p class="hint">You can't disable your own account, and an admin can only be disabled by another active admin, so there is always one left. A disabled user is blocked on their next request.</p>
+    <p id="empty" hidden>No accounts match.</p>
+    <table id="users" hidden>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="admin-common.js"></script>
+  <script src="users.js"></script>
+</body>
+</html>

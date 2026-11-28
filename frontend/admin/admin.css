@@ -1,0 +1,19 @@
+/* admin.css — small additions for the admin pages, loaded after ../css/style.css. Owner: Mohamed Wael. */
+.admin-nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin: 0 0 1rem; padding-bottom: .5rem; border-bottom: 1px solid #eee; }
+.admin-nav a[aria-current="page"] { font-weight: 600; text-decoration: none; }
+.mono { font-family: ui-monospace, monospace; word-break: break-all; }
+/* Phones: a wide table scrolls inside itself instead of making the whole page scroll sideways. */
+@media (max-width: 640px) { main table { display: block; overflow-x: auto; } }
+.actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; margin: .5rem 0 1rem; }
+.inline label { margin: 0; }
+.inline input, .inline select { padding: .3rem; }
+.counts { display: flex; flex-wrap: wrap; gap: 1rem; padding: 0; list-style: none; }
+.counts li { border: 1px solid #ddd; border-radius: 4px; padding: .4rem .8rem; }
+.counts strong { display: block; font-size: 1.3rem; }
+.rubric td input { width: 100%; box-sizing: border-box; padding: .25rem; }
+.rubric td.weight input { width: 4.5rem; }
+.years { display: flex; flex-wrap: wrap; gap: .75rem; }
+.years label { display: inline-flex; gap: .25rem; margin: 0; }
+.secret { font-family: ui-monospace, monospace; font-size: 1.1rem; background: #fff8e1; padding: .2rem .5rem; border-radius: 4px; user-select: all; }
+fieldset { border: 1px solid #ddd; border-radius: 4px; margin-top: 1rem; min-width: 0; } /* default min-content would stretch the page */
