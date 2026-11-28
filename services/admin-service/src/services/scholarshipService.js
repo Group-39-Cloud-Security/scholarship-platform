@@ -4,7 +4,7 @@
 // Every change is ONE UpdateItem with a ConditionExpression, so two admins (or two clicks) can never both win.
 // If the condition fails these functions return null and the controller decides between 404 and 409.
 
-const { GetCommand, PutCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+const { GetCommand, PutCommand, QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('../../shared/dynamo');
 
 const TABLE = process.env.SCHOLARSHIPS_TABLE;
@@ -92,4 +92,26 @@ async function close(scholarshipId) {
   }
 }
 
-module.exports = { createScholarship, getScholarship, updateDraft, publish, close };
+// Every scholarship with one of these statuses: one Query per status on status-deadline-index (every page),
+// never a Scan. The index projects all attributes, so the items are complete.
+async function listByStatus(statuses) {
+  const items = [];
+  for (const status of statuses) {
+    let ExclusiveStartKey;
+    do {
+      const res = await docClient.send(new QueryCommand({
+        TableName: TABLE,
+        IndexName: 'status-deadline-index',
+        KeyConditionExpression: '#s = :s',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':s': status },
+        ExclusiveStartKey,
+      }));
+      items.push(...(res.Items || []));
+      ExclusiveStartKey = res.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+  }
+  return items;
+}
+
+module.exports = { createScholarship, getScholarship, updateDraft, publish, close, listByStatus };

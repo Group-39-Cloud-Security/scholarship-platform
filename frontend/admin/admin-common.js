@@ -63,12 +63,6 @@ const AdminUI = (() => {
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
-  // One page (newest first) of AuditLog rows for one action: GET /api/admin/audit-log?action=&limit=
-  async function auditRows(action, limit = 100) {
-    const data = await apiRequest(`/api/admin/audit-log?action=${encodeURIComponent(action)}&limit=${limit}`);
-    return Array.isArray(data && data.items) ? data.items : [];
-  }
-
   // Shows the rows of a table, or the empty note when there are none.
   function fillTable(table, empty, rows) {
     table.querySelector('tbody').replaceChildren(...rows);
@@ -76,5 +70,5 @@ const AdminUI = (() => {
     empty.hidden = rows.length !== 0;
   }
 
-  return { start, myUserId, cleanId, isUuid, shortId, idCell, localToIso, auditRows, fillTable };
+  return { start, myUserId, cleanId, isUuid, shortId, idCell, localToIso, fillTable };
 })();

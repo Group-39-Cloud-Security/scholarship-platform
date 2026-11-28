@@ -1,4 +1,4 @@
-<!-- admin/applications.html — Owner: Mohamed Wael. Accept or reject reviewed applications (PATCH .../decision); lists from the audit log. textContent only. -->
+<!-- admin/applications.html — Owner: Mohamed Wael. One scholarship's applications with scores; accept or reject reviewed ones. textContent only. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -18,28 +18,16 @@
   <main>
     <h1>Applications</h1>
     <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
-    <p class="hint">Only reviewed applications can be decided, a decision is final, a flagged application can only be rejected, and accepting stops when the scholarship's awards are used up. The student is emailed either way.</p>
-    <p id="message" class="message" role="alert" hidden></p>
-
-    <h2>Waiting for a decision</h2>
-    <p class="hint">Reviews finished through the review pages and not decided yet (from the audit log, newest first).</p>
-    <p id="empty-waiting" hidden>Nothing is waiting for a decision.</p>
-    <table id="waiting" hidden>
-      <thead><tr><th>Application</th><th>Reviewed</th><th>Review result</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table>
-
-    <h2>Decide by id</h2>
-    <form id="by-id" class="inline" novalidate>
-      <label>Application id <input id="aid" size="38" maxlength="36" autocomplete="off" spellcheck="false"></label>
-      <button type="submit">Accept</button>
-      <button type="button" id="reject-by-id" class="danger">Reject</button>
+    <form id="pick" class="inline" novalidate>
+      <label>Scholarship <select id="scholarship"></select></label>
+      <button type="submit">Show</button>
     </form>
-
-    <h2>Recent decisions</h2>
-    <p id="empty-decided" hidden>No decisions yet.</p>
-    <table id="decided" hidden>
-      <thead><tr><th>Application</th><th>Decided</th><th>Decision</th><th>By</th></tr></thead>
+    <p class="hint">Highest review score first. Only reviewed applications can be decided, a decision is final, a flagged application can only be rejected, and accepting stops when the awards are used up. The student is emailed either way.</p>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p id="summary" hidden></p>
+    <p id="empty" hidden>No applications for this scholarship yet.</p>
+    <table id="apps" hidden>
+      <thead><tr><th>Student</th><th>Status</th><th>Score</th><th>Review</th><th>Email</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </main>
