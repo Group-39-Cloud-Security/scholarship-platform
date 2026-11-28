@@ -1,2 +1,42 @@
-<!-- admin/audit.html — Owner: Mohamed Wael. Calls the real API via ../js/api.js; plain HTML, textContent only. -->
-<!-- TODO -->
+<!-- admin/audit.html — Owner: Mohamed Wael. Read the audit log by action (GET /api/admin/audit-log). textContent only. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://*.execute-api.localhost.floci.io:4566 http://*.execute-api.localhost:4566; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Audit log | Admin | Scholarship Platform</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong>Scholarship Platform</strong>
+    <nav id="nav" aria-label="Main"></nav>
+  </header>
+  <main>
+    <h1>Audit log</h1>
+    <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
+    <form id="query" class="inline" novalidate>
+      <label>Event <select id="action"></select></label>
+      <label>Since (optional) <input id="since" type="datetime-local"></label>
+      <label>Per page <input id="limit" type="number" min="1" max="100" step="1" value="50"></label>
+      <button type="submit">Show</button>
+    </form>
+    <p id="message" class="message" role="alert" hidden></p>
+    <p id="empty" hidden>No events of this kind in that period.</p>
+    <table id="rows" hidden>
+      <thead><tr><th>When</th><th>Event</th><th>User</th><th>Target</th><th>Detail</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p><button type="button" id="more" class="secondary" hidden>Load older</button></p>
+  </main>
+  <script src="../js/config.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script src="admin-common.js"></script>
+  <script src="audit.js"></script>
+</body>
+</html>

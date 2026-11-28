@@ -1139,6 +1139,62 @@ else
   skip T-ADM-72 "notification-sender tests (72-81)" "need the AWS CLI"
 fi
 
+# ---------- GET scholarships, one scholarship, its applications with scores ----------
+# Uses the seed data (platform/seed.sh): fixed ids, scored application 72, flagged one "ineligible".
+SEED_CLOUD=5eed1000-0000-4000-8000-000000000001; SEED_WOMEN=5eed1000-0000-4000-8000-000000000002
+SEED_DRAFT=5eed1000-0000-4000-8000-000000000003
+SEED_SUBMITTED=5eed2000-0000-4000-8000-000000000001; SEED_SCORED=5eed2000-0000-4000-8000-000000000003
+SEED_FLAGGED=5eed2000-0000-4000-8000-000000000004
+jq_body() { node -e "const b=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));process.exit((${1})(b)?0:1)" "$BODY"; }
+
+for p in $S $S/$SEED_CLOUD $S/$SEED_CLOUD/applications; do
+  call GET "$p" ""
+  expect T-ADM-84 "GET $p without a token" 401 UNAUTHENTICATED
+  call GET "$p" "$STUDENT"
+  expect T-ADM-84 "GET $p with a student token" 403 FORBIDDEN
+done
+
+call GET $S "$ADMIN"
+expect T-ADM-85 "list every scholarship" 200 "\"scholarshipId\":\"$SEED_DRAFT\""
+jq_body "(b) => Array.isArray(b) && b.some((s) => s.scholarshipId === '$SEED_CLOUD' && s.status === 'published')
+  && b.every((s, i) => i === 0 || String(b[i - 1].createdAt) >= String(s.createdAt))" && ok=ok || ok=no
+result T-ADM-85 "drafts and published ones, newest first" $ok
+call GET "$S?status=draft" "$ADMIN"
+expect T-ADM-85 "?status=draft" 200
+jq_body "(b) => b.length > 0 && b.every((s) => s.status === 'draft')" && ok=ok || ok=no
+result T-ADM-85 "only drafts" $ok
+call GET "$S?status=bogus" "$ADMIN"
+expect T-ADM-85 "?status=bogus" 400 "status must be one of"
+
+call GET $S/$SEED_CLOUD "$ADMIN"
+expect T-ADM-86 "one scholarship" 200 '"title":"Cloud Excellence Award"'
+jq_body "(b) => Array.isArray(b.rubric) && b.rubric.length === 3 && b.eligibility && Array.isArray(b.eligibility.years)" && ok=ok || ok=no
+result T-ADM-86 "with its rubric and eligibility (so a draft can be edited from its values)" $ok
+call GET $S/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d "$ADMIN"
+expect T-ADM-86 "unknown scholarship" 404 SCHOLARSHIP_NOT_FOUND
+call GET "$S/not-a-uuid" "$ADMIN"
+expect T-ADM-86 "id that is not a UUID" 400 "Scholarship id"
+
+call GET $S/$SEED_CLOUD/applications "$ADMIN"
+expect T-ADM-87 "applications of a scholarship" 200 "\"applicationId\":\"$SEED_SCORED\""
+jq_body "(b) => b.scholarship.scholarshipId === '$SEED_CLOUD' && Number.isInteger(b.scholarship.awards)
+  && b.applications.some((a) => a.applicationId === '$SEED_SCORED' && a.totalScore === 72 && a.scores && a.scores.academic === 8)
+  && b.applications.some((a) => a.applicationId === '$SEED_SUBMITTED' && a.totalScore === null)" && ok=ok || ok=no
+result T-ADM-87 "scored one has totalScore 72 and its scores; a submitted one has none" $ok
+jq_body "(b) => b.applications.every((a, i) => i === 0 || (b.applications[i - 1].totalScore ?? -1) >= (a.totalScore ?? -1))" && ok=ok || ok=no
+result T-ADM-87 "highest total first" $ok
+# ("essay" can be a rubric criterion inside scores, so check the application objects' own fields)
+jq_body "(b) => b.applications.every((a) => !('essay' in a) && !('pdfKey' in a) && !String(a.applicationId).startsWith('lock#'))" && ok=ok || ok=no
+STATUS="no essay, pdfKey or lock rows"; result T-ADM-87 "no essays, no PDF keys, no application-service lock rows" $ok
+call GET $S/$SEED_WOMEN/applications "$ADMIN"
+jq_body "(b) => b.applications.some((a) => a.applicationId === '$SEED_FLAGGED' && a.flagged === true && a.flagReason === 'ineligible' && a.totalScore === null)" && ok=ok || ok=no
+result T-ADM-87 "a flagged one shows flagged, its reason and no score" $ok
+
+call GET $S/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d/applications "$ADMIN"
+expect T-ADM-88 "applications of an unknown scholarship" 404 SCHOLARSHIP_NOT_FOUND
+call GET $S/$SEED_DRAFT/applications "$ADMIN"
+expect T-ADM-88 "a scholarship with no applications" 200 '"applications":[]'
+
 echo
 echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" = 0 ]

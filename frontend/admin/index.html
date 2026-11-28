@@ -1,5 +1,4 @@
-<!-- admin/index.html — PLACEHOLDER made with the shared shell (Khalil). The real admin pages are Mohamed Wael's (Phase C). -->
-<!-- TODO Phase C (Wael): replace this page, or point the Admin links in js/nav.js at scholarships.html, applications.html, users.html, audit.html. -->
+<!-- admin/index.html — Owner: Mohamed Wael. Admin overview: API health and live counts (GET /api/health, GET /api/admin/stats). textContent only. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,6 +8,7 @@
   <meta name="referrer" content="no-referrer">
   <title>Admin | Scholarship Platform</title>
   <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="admin.css">
 </head>
 <body>
   <header class="topbar">
@@ -16,13 +16,31 @@
     <nav id="nav" aria-label="Main"></nav>
   </header>
   <main>
-    <h1>Admin</h1>
-    <p class="message info">The admin pages are not built yet. Scholarships, decisions, accounts and the audit log will be reachable from here.</p>
+    <h1>Admin overview</h1>
+    <nav id="admin-nav" class="admin-nav" aria-label="Admin pages"></nav>
+    <p id="message" class="message" role="alert" hidden></p>
+
+    <h2>Scholarships</h2>
+    <ul id="scholarship-counts" class="counts"></ul>
+    <h2>Applications</h2>
+    <ul id="application-counts" class="counts"></ul>
+    <p class="hint">Counted live from the database every time this page loads.</p>
+    <p class="hint">API: <span id="health">checking…</span></p>
+
+    <h2>What you can do</h2>
+    <ul>
+      <li><a href="scholarships.html">Scholarships</a>: every scholarship, publish or close, open a draft to edit</li>
+      <li><a href="scholarship-edit.html">New scholarship</a>: rubric (weights sum to 100) and eligibility</li>
+      <li><a href="applications.html">Applications</a>: per scholarship with review scores, accept or reject (the student is emailed)</li>
+      <li><a href="users.html">Users</a>: list accounts, create reviewers, disable or enable accounts</li>
+      <li><a href="audit.html">Audit log</a>: logins, failed logins, decisions and every other recorded event</li>
+    </ul>
   </main>
   <script src="../js/config.js"></script>
   <script src="../js/auth.js"></script>
   <script src="../js/api.js"></script>
   <script src="../js/nav.js"></script>
+  <script src="admin-common.js"></script>
   <script src="index.js"></script>
 </body>
 </html>
