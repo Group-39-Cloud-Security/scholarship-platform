@@ -4,8 +4,8 @@
 // POST /api/admin/scholarships            → 201 the new draft
 // PUT  /api/admin/scholarships/{id}       → 200 (only while draft; replaces every editable field; 409 after publish)
 // PATCH /api/admin/scholarships/{id}/status { status: 'published' } → 200 (409 with the reason, e.g. deadline passed)
+// GET  /api/admin/scholarships/{id}       → 200 the current values, so editing starts from them
 // The checks on this page only help the admin; the server checks everything again and its message is shown.
-// There is no GET for one scholarship in the admin API, so editing starts from an empty form (PUT replaces all fields).
 
 (() => {
   if (!AdminUI.start()) return;
@@ -23,7 +23,7 @@
   function setMode() {
     if (!scholarshipId) return;
     $('heading').textContent = 'Edit draft';
-    $('mode-hint').textContent = `Scholarship ${scholarshipId}. Saving replaces every field of the draft, so fill them all in. `
+    $('mode-hint').textContent = `Scholarship ${scholarshipId}. Change what you need and save. `
       + 'A published or closed scholarship can no longer be edited.';
     $('save').textContent = 'Save changes';
   }
@@ -140,6 +140,47 @@
     showMessage(message, 'That scholarship id is not valid. Open a draft from the Scholarships page.');
     return;
   }
+  // ISO 8601 UTC → the value a datetime-local input wants, in the admin's local time ("2027-01-15T23:59").
+  function isoToLocal(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  }
+
+  function fill(s) {
+    $('title').value = s.title || '';
+    $('description').value = s.description || '';
+    $('deadline').value = isoToLocal(s.deadline);
+    $('awards').value = s.awards;
+    $('criteria').replaceChildren();
+    (s.rubric || []).forEach((c) => addCriterion([c.criterionId, c.name, c.description, c.weight]));
+    const e = s.eligibility || {};
+    $('domains').value = (e.allowedDomains || []).join(', ');
+    $('mingpa').value = typeof e.minGpa === 'number' ? e.minGpa : 0;
+    document.querySelectorAll('.year').forEach((c) => { c.checked = (e.years || []).includes(Number(c.value)); });
+  }
+
+  async function loadDraft() {
+    showMessage(message, 'Loading the scholarship…', 'info');
+    try {
+      const s = await apiRequest(`/api/admin/scholarships/${encodeURIComponent(scholarshipId)}`);
+      fill(s);
+      if (s.status !== 'draft') {
+        // Locked after publishing (§6): show the values, don't offer a save the server would refuse with 409.
+        $('form').querySelectorAll('input, textarea, button').forEach((n) => { n.disabled = true; });
+        $('save').hidden = true;
+        showMessage(message, `This scholarship is ${s.status}, so it can no longer be edited.`, 'info');
+        showSaved(s);
+        return;
+      }
+      showMessage(message, '');
+    } catch (err) {
+      $('form').hidden = true;
+      showMessage(message, err.message); // 404 unknown id
+    }
+  }
+
   setMode();
-  DEFAULT_RUBRIC.forEach(addCriterion);
+  if (scholarshipId) loadDraft();
+  else DEFAULT_RUBRIC.forEach(addCriterion);
 })();

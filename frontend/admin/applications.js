@@ -1,36 +1,34 @@
-// applications.js — logic for admin/applications.html: decide reviewed applications
+// applications.js — logic for admin/applications.html?scholarship=<id>: applications with scores, decide reviewed ones
 // Owner: Mohamed Wael   ·   Rules: CLAUDE.md §6 Deciding, §8, §10 (textContent only)
 //
+// GET   /api/admin/scholarships                       → the list for the picker (published and closed ones)
+// GET   /api/admin/scholarships/{id}/applications     → 200 { scholarship, applications: [...] } highest total first
 // PATCH /api/admin/applications/{id}/decision { decision: 'accepted' | 'rejected' }
-//   → 200 { applicationId, scholarshipId, status, decidedBy, decidedAt, emailStatus: 'queued' | 'failed' }
-//   409 not reviewed / already decided / flagged accept / awards used up (the message says which)
-// The admin API has no list of applications, so the lists come from the audit log:
-//   action=review   (written by review-service: targetId = applicationId, detail "scored 72" or "flagged: ineligible")
-//   action=decision (targetId = applicationId, detail "accepted" / "rejected")
+//   → 200 { status, emailStatus: 'queued' | 'failed', ... }; 409 not reviewed / already decided / flagged accept / awards used up
 
 (() => {
   if (!AdminUI.start()) return;
 
   const $ = (id) => document.getElementById(id);
   const message = $('message');
-  const LABEL = { accepted: 'Accepted', rejected: 'Rejected' };
+  const STATUS = { submitted: 'Submitted', under_review: 'Under review', reviewed: 'Reviewed', accepted: 'Accepted', rejected: 'Rejected' };
+  const FLAG = { incomplete_documents: 'Incomplete documents', ineligible: 'Ineligible', plagiarism_suspected: 'Plagiarism suspected', other: 'Other' };
 
-  async function decide(applicationId, decision, button) {
+  async function decide(a, decision, button) {
     const text = decision === 'accepted'
-      ? 'Accept this application? It uses one of the scholarship\'s awards and the student is emailed. A decision is final.'
-      : 'Reject this application? The student is emailed. A decision is final.';
+      ? `Accept the application from ${a.studentEmail}? It uses one award and the student is emailed. A decision is final.`
+      : `Reject the application from ${a.studentEmail}? The student is emailed. A decision is final.`;
     if (!window.confirm(text)) return;
     const done = busy(button, decision === 'accepted' ? 'Accepting…' : 'Rejecting…');
     try {
-      const r = await apiRequest(`/api/admin/applications/${encodeURIComponent(applicationId)}/decision`, {
+      const r = await apiRequest(`/api/admin/applications/${encodeURIComponent(a.applicationId)}/decision`, {
         method: 'PATCH', body: { decision },
       });
       const email = r.emailStatus === 'failed'
-        ? 'The email could not be queued (emailStatus failed); the decision still stands.'
+        ? 'The email could not be queued (email failed); the decision still stands.'
         : 'The decision email is queued.';
-      showMessage(message, `Application ${AdminUI.shortId(r.applicationId)}: ${LABEL[r.status] || r.status}. ${email}`,
-        r.emailStatus === 'failed' ? 'info' : 'success');
       await load(false);
+      showMessage(message, `${a.studentEmail}: ${STATUS[r.status] || r.status}. ${email}`, r.emailStatus === 'failed' ? 'info' : 'success');
     } catch (err) {
       showMessage(message, err.message);
     } finally {
@@ -38,59 +36,79 @@
     }
   }
 
-  function decisionButtons(applicationId, flagged) {
-    const accept = el('button', { type: 'button' }, 'Accept');
-    const reject = el('button', { type: 'button', className: 'danger' }, 'Reject');
-    if (flagged) {
-      accept.disabled = true;
-      accept.title = 'A flagged application can only be rejected.';
+  function reviewCell(a) {
+    if (a.flagged) {
+      return el('td', {}, el('strong', {}, `Flagged: ${FLAG[a.flagReason] || a.flagReason || '-'}`),
+        a.flagNote ? el('br') : null, a.flagNote ? el('span', { className: 'hint' }, a.flagNote) : null);
     }
-    accept.addEventListener('click', () => decide(applicationId, 'accepted', accept));
-    reject.addEventListener('click', () => decide(applicationId, 'rejected', reject));
-    return el('div', { className: 'actions' }, accept, reject);
+    if (a.scores) return el('td', {}, Object.entries(a.scores).map(([k, v]) => `${k} ${v}`).join(', '));
+    return el('td', { className: 'hint' }, a.status === 'under_review' ? 'Being reviewed' : 'Not reviewed yet');
+  }
+
+  function render({ scholarship, applications }) {
+    const full = scholarship.acceptedCount >= scholarship.awards;
+    $('summary').textContent = `${scholarship.title} (${scholarship.status}): ${applications.length} application(s), `
+      + `${scholarship.acceptedCount || 0} of ${scholarship.awards} awards used.`;
+    $('summary').hidden = false;
+    const rows = applications.filter((a) => AdminUI.isUuid(a.applicationId)).map((a) => {
+      let actions = null;
+      if (a.status === 'reviewed') {
+        const accept = el('button', { type: 'button' }, 'Accept');
+        const reject = el('button', { type: 'button', className: 'danger' }, 'Reject');
+        if (a.flagged || full) {
+          accept.disabled = true;
+          accept.title = a.flagged ? 'A flagged application can only be rejected.' : 'All awards are used.';
+        }
+        accept.addEventListener('click', () => decide(a, 'accepted', accept));
+        reject.addEventListener('click', () => decide(a, 'rejected', reject));
+        actions = el('div', { className: 'actions' }, accept, reject);
+      }
+      return el('tr', {},
+        el('td', {}, a.studentEmail || '-', el('br'), el('span', { className: 'hint' },
+          `GPA ${a.gpa ?? '-'}, year ${a.yearOfStudy ?? '-'}, submitted ${formatDate(a.submittedAt)}`)),
+        el('td', {}, STATUS[a.status] || a.status, a.decidedAt ? el('span', { className: 'hint' }, ` ${formatDate(a.decidedAt)}`) : null),
+        el('td', { className: 'num' }, a.totalScore === null || a.totalScore === undefined ? '-' : `${a.totalScore} / 100`),
+        reviewCell(a),
+        el('td', {}, a.emailStatus || '-'),
+        el('td', {}, actions));
+    });
+    AdminUI.fillTable($('apps'), $('empty'), rows);
   }
 
   async function load(clearMessage = true) {
-    if (clearMessage) showMessage(message, 'Loading…', 'info');
+    const id = $('scholarship').value;
+    if (!AdminUI.isUuid(id)) return;
+    window.history.replaceState(null, '', `?scholarship=${encodeURIComponent(id)}`);
+    if (clearMessage) showMessage(message, 'Loading applications…', 'info');
     try {
-      const [reviews, decisions] = await Promise.all([AdminUI.auditRows('review'), AdminUI.auditRows('decision')]);
-      const decided = new Set(decisions.map((d) => d.targetId));
-      const seen = new Set();
-      const waiting = reviews
-        .filter((r) => AdminUI.isUuid(r.targetId) && !decided.has(r.targetId) && !seen.has(r.targetId) && seen.add(r.targetId))
-        .map((r) => {
-          const flagged = typeof r.detail === 'string' && r.detail.startsWith('flagged');
-          return el('tr', {}, AdminUI.idCell(r.targetId), el('td', {}, formatDate(r.createdAt)),
-            el('td', {}, r.detail || '-'), el('td', {}, decisionButtons(r.targetId, flagged)));
-        });
-      AdminUI.fillTable($('waiting'), $('empty-waiting'), waiting);
-      AdminUI.fillTable($('decided'), $('empty-decided'), decisions.map((d) => el('tr', {},
-        AdminUI.idCell(d.targetId), el('td', {}, formatDate(d.createdAt)),
-        el('td', {}, LABEL[d.detail] || d.detail || '-'), AdminUI.idCell(d.userId))));
+      render(await apiRequest(`/api/admin/scholarships/${encodeURIComponent(id)}/applications`));
       if (clearMessage) showMessage(message, '');
     } catch (err) {
-      ['waiting', 'decided', 'empty-waiting', 'empty-decided'].forEach((id) => { $(id).hidden = true; });
+      ['apps', 'empty', 'summary'].forEach((x) => { $(x).hidden = true; });
       showMessage(message, err.message);
     }
   }
 
-  function idFromBox() {
-    const id = AdminUI.cleanId($('aid').value);
-    if (!AdminUI.isUuid(id)) {
-      showMessage(message, 'Enter an application id (a UUID like 4123d54c-19de-4551-8f8b-5f88bf29438e).');
-      return null;
+  async function start() {
+    showMessage(message, 'Loading scholarships…', 'info');
+    try {
+      // Drafts can't have applications, so only published and closed ones are offered.
+      const list = (await apiRequest('/api/admin/scholarships')).filter((s) => s.status !== 'draft' && AdminUI.isUuid(s.scholarshipId));
+      if (!list.length) {
+        showMessage(message, 'No published or closed scholarships yet, so there are no applications.', 'info');
+        $('pick').hidden = true;
+        return;
+      }
+      $('scholarship').replaceChildren(...list.map((s) => el('option', { value: s.scholarshipId }, `${s.title} (${s.status})`)));
+      const wanted = AdminUI.cleanId(new URLSearchParams(window.location.search).get('scholarship'));
+      if (list.some((s) => s.scholarshipId === wanted)) $('scholarship').value = wanted;
+      await load();
+    } catch (err) {
+      showMessage(message, err.message);
     }
-    return id;
   }
-  $('by-id').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const id = idFromBox();
-    if (id) decide(id, 'accepted', e.submitter || $('by-id').querySelector('button'));
-  });
-  $('reject-by-id').addEventListener('click', (e) => {
-    const id = idFromBox();
-    if (id) decide(id, 'rejected', e.currentTarget);
-  });
 
-  load();
+  $('pick').addEventListener('submit', (e) => { e.preventDefault(); load(); });
+  $('scholarship').addEventListener('change', () => load());
+  start();
 })();
