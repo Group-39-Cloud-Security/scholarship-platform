@@ -5,12 +5,11 @@ Owner: **Shared (lead: Mohamed Wael, reviewed by all)** · Group 39 Scholarship 
 ## Functions
 register · login · change password · current user (shared component — not counted as anyone's 3 functions)
 
-## Slices (built in Phase B, after every service passes its own tests)
-| Slice | Owner |
-|---|---|
-| register: domain check, minimum length, Pwned Passwords (`pwnedService.js`) | Khalil |
-| login backoff: `loginAttemptService.js`, 429, `login_failed` events, CloudWatch filter + alarm | Hazem |
-| login (bcryptjs + JWT), `GET /me`, password change, `infra/deploy.sh` | Wael (lead, reviews every PR) |
+## Who built it
+Built in Phase B by Wael for the whole team (group decision 28 Nov, `docs/decisions.md`), instead of the three slices first planned in CLAUDE.md §1. Khalil and Hazem review every PR. The `login_failed` metric filter and alarm stay in review-service's `deploy.sh` (Hazem).
+
+## Tests
+`bash services/auth-service/tests/api-tests.sh` from the repo root (T-AUT rows in `docs/api-test-plan.md`, local Floci only).
 
 ## Run
 ```bash

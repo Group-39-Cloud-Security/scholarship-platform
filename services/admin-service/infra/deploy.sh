@@ -4,7 +4,7 @@
 # Owner: Mohamed Wael · Rules: CLAUDE.md §2 (who creates what), §4 (names), §7 (IAM), §8 (routes)
 # Safe to re-run: every step checks whether the thing already exists, and updates it if it does.
 #
-# Creates: Scholarships (+ the local test fixture Users), the notifications queues, the Brevo key in
+# Creates: Scholarships, the notifications queues, the Brevo key in
 # SSM (from the local .env, never printed), admin-service and notification-sender with their roles, the SQS trigger
 # for notification-sender, and the admin routes from §8.
 set -e
@@ -39,25 +39,6 @@ if ! aws dynamodb describe-table --table-name Scholarships >/dev/null 2>&1; then
 else
   echo "table Scholarships exists"
 fi
-
-# ---------- 1d. LOCAL TEST FIXTURE: Users table -------------------------------------------------------
-# Users belongs to the shared auth-service (CLAUDE.md §1, §5); admin-service only manages accounts in it.
-# Created here ONLY so account management can be tested on Floci before auth-service's deploy.sh exists.
-# Same key and index as §5 (email-index projects everything: login will need passwordHash), only created if
-# missing, so auth-service's table wins once its script runs first.
-# REMOVE THIS WHOLE SECTION when services/auth-service/infra/deploy.sh creates the table.
-if ! aws dynamodb describe-table --table-name Users >/dev/null 2>&1; then
-  aws dynamodb create-table --table-name Users \
-    --attribute-definitions AttributeName=userId,AttributeType=S AttributeName=email,AttributeType=S \
-    --key-schema AttributeName=userId,KeyType=HASH \
-    --global-secondary-indexes '[{"IndexName":"email-index","KeySchema":[{"AttributeName":"email","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
-    --billing-mode PAY_PER_REQUEST >/dev/null
-  aws dynamodb wait table-exists --table-name Users
-  echo "created table Users (LOCAL TEST FIXTURE, owned by auth-service)"
-else
-  echo "table Users exists"
-fi
-# ---------- end of LOCAL TEST FIXTURE ----------------------------------------------------------------
 
 # ---------- 1c. SQS: notifications-dlq, then notifications with a redrive policy (§2, §6 Deciding) ----------
 # A decision email message that fails 3 times (notification-sender throws) moves to notifications-dlq instead of

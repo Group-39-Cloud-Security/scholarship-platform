@@ -131,8 +131,10 @@ fi
 # ---------- 6. CloudWatch: count login_failed lines from auth-service, alarm on > 20 in 5 minutes ----------
 # The log group may not exist until auth-service has logged once, so create it (ignore "already exists").
 aws logs create-log-group --log-group-name /aws/lambda/auth-service >/dev/null 2>&1 || true
+# Plain-text pattern, not { $.action = ... }: Lambda writes "<time> <requestId> INFO " before our JSON, so a JSON
+# pattern matches nothing on Floci. The quoted phrase matches the "action":"login_failed" field exactly.
 if aws logs put-metric-filter --log-group-name /aws/lambda/auth-service --filter-name login-failed \
-     --filter-pattern '{ $.action = "login_failed" }' \
+     --filter-pattern '"\"action\":\"login_failed\""' \
      --metric-transformations metricName=LoginFailed,metricNamespace=Group39/Security,metricValue=1,defaultValue=0 \
    && aws cloudwatch put-metric-alarm --alarm-name login-failed-spike \
      --alarm-description "More than 20 failed logins in 5 minutes" \
