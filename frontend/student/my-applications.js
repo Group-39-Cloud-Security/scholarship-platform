@@ -1,5 +1,8 @@
-// my-applications.js — logic for student/my-applications.html  (STUB: not connected to the API yet)
+// my-applications.js — logic for student/my-applications.html
 // Owner: Mohamed Khalil   ·   Rules: CLAUDE.md §8 (GET /api/applications/mine), §10 (textContent only)
+//
+// GET /api/applications/mine → 200 [ { applicationId, scholarshipTitle, status, submittedAt, canWithdraw, ... } ]
+// newest first, [] when none. Never the reviewer, scores, flag or essay.
 
 (() => {
   if (!startPage('student')) return;
@@ -16,7 +19,6 @@
     rejected: 'Rejected',
   };
 
-  // items = the array from GET /api/applications/mine (newest first). Built with el(), so titles are text only.
   function render(items) {
     const rows = items.filter((a) => validId(a.applicationId)).map((a) => el('tr', {},
       el('td', {}, a.scholarshipTitle || 'Untitled scholarship'),
@@ -28,11 +30,17 @@
     empty.hidden = rows.length !== 0;
   }
 
-  // TODO: the real call goes here:
-  //   try {
-  //     render(await apiRequest('/api/applications/mine'));   // 200 [] when there are none
-  //   } catch (err) {
-  //     showMessage(message, err.message);                    // 401 already sent the user to login
-  //   }
-  showMessage(message, 'Your applications will be listed here. Not connected to the API yet (TODO).', 'info');
+  async function load() {
+    showMessage(message, 'Loading your applications…', 'info');
+    try {
+      render(await apiRequest('/api/applications/mine'));
+      // Fixed text for ?withdrawn=1 (set by application-status.html after a withdraw); the value is never shown.
+      const withdrawn = new URLSearchParams(window.location.search).get('withdrawn') === '1';
+      showMessage(message, withdrawn ? 'Your application was withdrawn and its PDF deleted.' : '', 'success');
+    } catch (err) {
+      showMessage(message, err.message); // a 401 has already sent the user to the login page
+    }
+  }
+
+  load();
 })();
